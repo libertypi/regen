@@ -36,7 +36,7 @@ class Testregenerator(unittest.TestCase):
             (r"[ _-]?", ("", " ", "_", "-")),
             (r"A[B3-5]C", ("ABC", "A[3-5]C")),
             (r"AB|CD", ("AB", "CD")),
-            (r"(A(B|C(D|E)*)*|F)", ("A(B|C(D|E)*)*", "F")),
+            (r"(A(B|C(D|E)*)*|F)", ("A(B|C[DE]*)*", "F")),
             (r"A(\B*\C|\D)?", ("A", "A\\B*\\C", "A\\D")),
         )
         for regex, answer in values:
