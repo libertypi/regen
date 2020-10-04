@@ -69,15 +69,16 @@ class Testregenerator(unittest.TestCase):
             self.assertEqual(regenerator.Optimizer(*e).result, answer)
 
     def test_file(self):
-        testFile = ("av_censored_id.txt",)
+        testFile = ("av_regex/av_censored_id.txt", "av_regex/av_uncensored_id.txt")
         for file in testFile:
+            file = os.path.join(os.path.dirname(__file__), file)
             if not os.path.exists(file):
                 print(file, "Not Found!")
                 continue
 
             with open(file) as f:
                 words = f.read().splitlines()
-                words.sort()
+            words.sort()
 
             e = (regenerator.Extractor(i) for i in words)
             r = regenerator.Optimizer(*e).result
@@ -87,7 +88,7 @@ class Testregenerator(unittest.TestCase):
 
 def test_regex(regex: str, wordlist: list):
     extracted = regenerator.Extractor(regex).get_text()
-    assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original word list."
+    assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original words."
 
     regex = re.compile(regex)
     for i in wordlist:
