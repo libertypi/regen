@@ -215,7 +215,6 @@ class Optimizer:
         tokens = tuple(t for e in extracted for t in e.result)
         self._connection = {}
         self.result = self._compute_regex(tokens)
-        print(self._compute_regex.cache_info())
 
     @lru_cache(maxsize=4096)
     def _compute_regex(self, tokens: Tuple[Tuple[str]]):
@@ -286,18 +285,17 @@ class Optimizer:
 
             connection = self._connection
             connectionKeys = set()
-            left = (((j for i in v for j in lgroup[i]), (k, v)) for k, v in left.items())
-            right = (((j for i in v for j in rgroup[i]), (v, k)) for k, v in right.items())
+            left = ((frozenset(j for i in v for j in lgroup[i]), (k, v)) for k, v in left.items())
+            right = ((frozenset(j for i in v for j in rgroup[i]), (v, k)) for k, v in right.items())
             for i in (left, right):
                 for key, val in i:
-                    key = frozenset(key)
                     connectionKeys.add(key)
                     length = sum(len(j) for i in val for j in i)
                     try:
                         v = connection[key]
                     except KeyError:
                         connection[key] = [
-                            tuple(frozenset(i) for i in val),  # Partition
+                            val,  # Partition
                             sum(sum(len(i) for i in j) for j in key) + len(key) - 1,  # concatLength
                             length,  # Partition length
                             None,  # computed regex string
@@ -305,7 +303,7 @@ class Optimizer:
                         ]
                     else:
                         if length < v[2]:
-                            v[0] = tuple(frozenset(i) for i in val)
+                            v[0] = val
                             v[2] = length
                             v[3] = v[4] = None
 
@@ -323,7 +321,7 @@ class Optimizer:
                     reduced = v[4]
 
                     if string is None:
-                        left, right = v[0]
+                        left, right = (frozenset(i) for i in v[0])
                         string = v[3] = f"{compute_regex(left)}{compute_regex(right)}"
                         reduced = v[4] = v[1] - len(string)
 
