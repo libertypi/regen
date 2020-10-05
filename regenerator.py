@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 import re
-from collections import defaultdict
+from collections import defaultdict, deque
 from functools import lru_cache
 from typing import Iterable, List, Tuple
 
@@ -212,12 +212,11 @@ class Extractor:
 
 class Optimizer:
     def __init__(self, *extracted: Extractor) -> None:
-        tokens = tuple(t for e in extracted for t in e.result)
         self._connection = {}
-        self.result = self._compute_regex(tokens)
+        self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
 
     @lru_cache(maxsize=4096)
-    def _compute_regex(self, tokens: Tuple[Tuple[str]]):
+    def _compute_regex(self, tokens: Iterable[Tuple[str]]):
 
         tokenSet = set(tokens)
 
@@ -352,23 +351,22 @@ class Optimizer:
 
         return result
 
-    def _group_keys(self, keys: set):
+    def _group_keys(self, unVisited: set):
         """Group keys with common members together."""
-        unVisited = keys
         groups = []
-        stack = []
+        que = deque()
 
         while unVisited:
             currentVert = unVisited.pop()  # frozenset
-            stack.append(currentVert)
+            que.append(currentVert)
             currentGroup = [currentVert]
             groups.append(currentGroup)
-            while stack:
-                currentVert = stack.pop()
+            while que:
+                currentVert = que.popleft()
                 connected = tuple(i for i in unVisited if not currentVert.isdisjoint(i))
                 unVisited.difference_update(connected)
                 currentGroup.extend(connected)
-                stack.extend(connected)
+                que.extend(connected)
 
         for group in groups:
             group.sort(key=lambda k: self._connection[k][1], reverse=True)
