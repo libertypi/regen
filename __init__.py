@@ -213,11 +213,12 @@ class Optimizer:
     def __init__(self, *extracted: Extractor) -> None:
         self._connection = {}
         self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
+        print(self._compute_regex.cache_info())
 
     @lru_cache(maxsize=4096)
-    def _compute_regex(self, tokens: Iterable[Tuple[str]]):
+    def _compute_regex(self, tokenSet: Iterable[Tuple[str]]):
 
-        tokenSet = set(tokens)
+        tokenSet = set(tokenSet)
 
         if () in tokenSet:
             qmark = "?"
@@ -233,10 +234,17 @@ class Optimizer:
                 string = "".join(tokenSet.pop())
                 return f"({string})?" if qmark else string
 
+            result = []
+            que = deque()
             lgroup = defaultdict(set)
             rgroup = defaultdict(set)
+            lgroupReverse = defaultdict(list)
+            rgroupReverse = defaultdict(list)
             lsegment = {}
             rsegment = {}
+            connection = self._connection
+            connectionKeys = set()
+
             for token in tokenSet:
                 left = {token[i:]: token[:i] for i in range(1, len(token))}
                 right = {v: k for k, v in left.items()}
@@ -247,10 +255,91 @@ class Optimizer:
                     lgroup[k].add(token)
                 for k in right:
                     rgroup[k].add(token)
+
             lgroup = {k: v for k, v in lgroup.items() if len(v) > 1}
             rgroup = {k: v for k, v in rgroup.items() if len(v) > 1}
+            que.append((tokenSet, lgroup, rgroup))
 
-            result = sorted(self._find_min_comb(tokenSet, lgroup, rgroup, lsegment, rsegment))
+            while que:
+
+                tokenSet, lgroup, rgroup = que.popleft()
+
+                if lgroup or rgroup:
+                    for group, segment, target in (lgroup, lsegment, lgroupReverse), (rgroup, rsegment, rgroupReverse):
+                        for k, v in group.items():
+                            target[frozenset(segment[i][k] for i in v)].append(k)
+
+                    left = ((frozenset(j for i in v for j in lgroup[i]), (k, v)) for k, v in lgroupReverse.items())
+                    right = ((frozenset(j for i in v for j in rgroup[i]), (v, k)) for k, v in rgroupReverse.items())
+
+                    for i in (left, right):
+                        for key, val in i:
+                            connectionKeys.add(key)
+                            length = sum(len(j) for i in val for j in i)
+                            try:
+                                v = connection[key]
+                            except KeyError:
+                                # [0]: Partition
+                                # [1]: concatLength
+                                # [2]: Partition length
+                                # [3]: computed regex string
+                                # [4]: reduced: ( v[1] - len(v[3]), -v[1] )
+                                connection[key] = [
+                                    val,
+                                    sum(len(j) for i in key for j in i) + len(key) - 1,
+                                    length,
+                                    None,
+                                    None,
+                                ]
+                            else:
+                                if length < v[2]:
+                                    v[0] = val
+                                    v[2] = length
+                                    v[3] = v[4] = None
+
+                    for group in self._group_keys(connectionKeys):
+
+                        mostReduced = (-1, 0)
+                        optimal = None
+
+                        for key in group:
+                            v = connection[key]
+                            if v[1] <= mostReduced[0]:
+                                break
+
+                            if v[3] is None:
+                                left, right = (frozenset(i) for i in v[0])
+                                v[3] = f"{self._compute_regex(left)}{self._compute_regex(right)}"
+                                v[4] = (v[1] - len(v[3]), -v[1])
+
+                            if v[4] > mostReduced:
+                                mostReduced = v[4]
+                                optimal = key
+
+                        try:
+                            result.append(connection[optimal][3])
+                        except KeyError:
+                            continue
+
+                        subTokenSet = {j for i in group for j in i}
+                        tokenSet.difference_update(subTokenSet)
+                        subTokenSet.difference_update(optimal)
+                        if subTokenSet:
+                            subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
+                            subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
+                            que.append((subTokenSet, subLgroup, subRgroup))
+
+                if tokenSet:
+                    chars = frozenset(i for i in tokenSet if len(i) == 1)
+                    if chars:
+                        result.append(self._compute_regex(chars))
+                        tokenSet.difference_update(chars)
+                    result.extend(map("".join, tokenSet))
+
+                lgroupReverse.clear()
+                rgroupReverse.clear()
+
+            result.sort()
             string = "|".join(result)
 
             if qmark or len(result) > 1:
@@ -268,94 +357,20 @@ class Optimizer:
 
         return f"{tokenSet.pop()[0]}{qmark}"
 
-    def _find_min_comb(self, tokenSet: set, lgroup: dict, rgroup: dict, lsegment: dict, rsegment: dict):
-
-        if lgroup or rgroup:
-
-            left = defaultdict(list)
-            right = defaultdict(list)
-            for group, segment, target in (lgroup, lsegment, left), (rgroup, rsegment, right):
-                for k, v in group.items():
-                    target[frozenset(segment[i][k] for i in v)].append(k)
-
-            connection = self._connection
-            connectionKeys = set()
-            left = ((frozenset(j for i in v for j in lgroup[i]), (k, v)) for k, v in left.items())
-            right = ((frozenset(j for i in v for j in rgroup[i]), (v, k)) for k, v in right.items())
-
-            for i in (left, right):
-                for key, val in i:
-                    connectionKeys.add(key)
-                    length = sum(len(j) for i in val for j in i)
-                    try:
-                        v = connection[key]
-                    except KeyError:
-                        # [0]: Partition
-                        # [1]: concatLength
-                        # [2]: Partition length
-                        # [3]: computed regex string
-                        # [4]: reduced: ( v[1] - len(v[3]), -v[1] )
-                        connection[key] = [val, sum(len(j) for i in key for j in i) + len(key) - 1, length, None, None]
-                    else:
-                        if length < v[2]:
-                            v[0] = val
-                            v[2] = length
-                            v[3] = v[4] = None
-
-            compute_regex = self._compute_regex
-            for group in self._group_keys(connectionKeys):
-
-                mostReduced = (-1, 0)
-                optimal = None
-
-                for key in group:
-                    v = connection[key]
-                    if v[1] <= mostReduced[0]:
-                        break
-
-                    if v[3] is None:
-                        left, right = (frozenset(i) for i in v[0])
-                        v[3] = f"{compute_regex(left)}{compute_regex(right)}"
-                        v[4] = (v[1] - len(v[3]), -v[1])
-
-                    if v[4] > mostReduced:
-                        mostReduced = v[4]
-                        optimal = key
-
-                try:
-                    yield connection[optimal][3]
-                except KeyError:
-                    continue
-
-                subTokenSet = {j for i in group for j in i}
-                tokenSet.difference_update(subTokenSet)
-                subTokenSet.difference_update(optimal)
-                if subTokenSet:
-                    subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
-                    subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
-                    yield from self._find_min_comb(subTokenSet, subLgroup, subRgroup, lsegment, rsegment)
-
-        if tokenSet:
-            chars = frozenset(i for i in tokenSet if len(i) == 1)
-            if chars:
-                yield self._compute_regex(chars)
-                tokenSet.difference_update(chars)
-            yield from map("".join, tokenSet)
-
-    def _group_keys(self, unVisited: set):
+    def _group_keys(self, connectionKeys: set):
         """Group keys with common members together."""
         groups = []
         que = deque()
 
-        while unVisited:
-            currentVert = unVisited.pop()  # frozenset
+        while connectionKeys:
+            currentVert = connectionKeys.pop()  # frozenset
             que.append(currentVert)
             currentGroup = [currentVert]
             groups.append(currentGroup)
             while que:
                 currentVert = que.popleft()
-                connected = tuple(filterfalse(currentVert.isdisjoint, unVisited))
-                unVisited.difference_update(connected)
+                connected = tuple(filterfalse(currentVert.isdisjoint, connectionKeys))
+                connectionKeys.difference_update(connected)
                 currentGroup.extend(connected)
                 que.extend(connected)
 
