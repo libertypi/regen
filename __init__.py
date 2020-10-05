@@ -250,9 +250,7 @@ class Optimizer:
             lgroup = {k: v for k, v in lgroup.items() if len(v) > 1}
             rgroup = {k: v for k, v in rgroup.items() if len(v) > 1}
 
-            result = self._find_min_comb(tokenSet, lgroup, rgroup, lsegment, rsegment)
-
-            result.sort()
+            result = sorted(self._find_min_comb(tokenSet, lgroup, rgroup, lsegment, rsegment))
             string = "|".join(result)
 
             if qmark or len(result) > 1:
@@ -271,8 +269,6 @@ class Optimizer:
         return f"{tokenSet.pop()[0]}{qmark}"
 
     def _find_min_comb(self, tokenSet: set, lgroup: dict, rgroup: dict, lsegment: dict, rsegment: dict):
-
-        result = []
 
         if lgroup or rgroup:
 
@@ -327,7 +323,7 @@ class Optimizer:
                         optimal = key
 
                 try:
-                    result.append(connection[optimal][3])
+                    yield connection[optimal][3]
                 except KeyError:
                     continue
 
@@ -337,16 +333,14 @@ class Optimizer:
                 if subTokenSet:
                     subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
                     subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
-                    result.extend(self._find_min_comb(subTokenSet, subLgroup, subRgroup, lsegment, rsegment))
+                    yield from self._find_min_comb(subTokenSet, subLgroup, subRgroup, lsegment, rsegment)
 
         if tokenSet:
             chars = frozenset(i for i in tokenSet if len(i) == 1)
             if chars:
-                result.append(self._compute_regex(chars))
+                yield self._compute_regex(chars)
                 tokenSet.difference_update(chars)
-            result.extend(map("".join, tokenSet))
-
-        return result
+            yield from map("".join, tokenSet)
 
     def _group_keys(self, unVisited: set):
         """Group keys with common members together."""
