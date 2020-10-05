@@ -1,13 +1,13 @@
-import regenerator
-import unittest
 import os.path
-import re
+import unittest
+
+from __init__ import Extractor, Optimizer, Tokenizer
 
 
-class Testregenerator(unittest.TestCase):
+class Testregen(unittest.TestCase):
     def test_tokenizer(self):
         string = "ABCD*E?*+F{1,5}G"
-        t = regenerator.Tokenizer(string)
+        t = Tokenizer(string)
         self.assertEqual(t.eat(), "A")
         self.assertEqual(t.peek(), "B")
         self.assertEqual(t.eat(), "B")
@@ -22,7 +22,7 @@ class Testregenerator(unittest.TestCase):
         self.assertEqual(t.eat_suffix(), "{1,5}")
         self.assertEqual(t.eat(), "G")
 
-        self.assertRaises(RuntimeError, regenerator.Tokenizer(string).confirm)
+        self.assertRaises(RuntimeError, Tokenizer(string).confirm)
 
     def test_extractor(self):
         values = (
@@ -40,14 +40,14 @@ class Testregenerator(unittest.TestCase):
             (r"A(\B*\C|\D)?", ("A", "A\\B*\\C", "A\\D")),
         )
         for regex, answer in values:
-            result = tuple(regenerator.Extractor(regex).get_text())
+            result = tuple(Extractor(regex).get_text())
             self.assertEqual(result, answer, msg=result)
 
     def test_extractor_raises(self):
         values = ("A[B", "A(BC|", "AB|((CD)", "A[[B]", "A[[BB]]", "A*?+B{}", "|{3}", "A|B{a3}", "A|B{3")
         for regex in values:
             with self.assertRaises(ValueError, msg=regex):
-                tuple(regenerator.Extractor(regex).get_text())
+                tuple(Extractor(regex).get_text())
 
     def test_optimizer(self):
         values = (
@@ -65,13 +65,14 @@ class Testregenerator(unittest.TestCase):
             ),
         )
         for words, answer in values:
-            e = (regenerator.Extractor(i) for i in words)
-            self.assertEqual(regenerator.Optimizer(*e).result, answer)
+            e = (Extractor(i) for i in words)
+            self.assertEqual(Optimizer(*e).result, answer)
 
     def test_file(self):
-        testFile = ("av_regex/av_censored_id.txt", "av_regex/av_uncensored_id.txt")
+        testFile = ("av_censored_id.txt", "av_uncensored_id.txt")
+        testDir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../transmission-torrent-done/component/"))
         for file in testFile:
-            file = os.path.join(os.path.dirname(__file__), file)
+            file = os.path.join(testDir, file)
             if not os.path.exists(file):
                 print(file, "Not Found!")
                 continue
@@ -80,20 +81,10 @@ class Testregenerator(unittest.TestCase):
                 words = f.read().splitlines()
             words.sort()
 
-            e = (regenerator.Extractor(i) for i in words)
-            r = regenerator.Optimizer(*e).result
-            e = sorted(regenerator.Extractor(r).get_text())
+            e = (Extractor(i) for i in words)
+            r = Optimizer(*e).result
+            e = sorted(Extractor(r).get_text())
             self.assertEqual(words, e)
-
-
-def test_regex(regex: str, wordlist: list):
-    extracted = regenerator.Extractor(regex).get_text()
-    assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original words."
-
-    regex = re.compile(regex)
-    for i in wordlist:
-        if not regex.fullmatch(i):
-            assert re.search(r"[*+{}]", i), "Regex matching test failed."
 
 
 if __name__ == "__main__":

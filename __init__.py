@@ -1,7 +1,5 @@
-#!/usr/bin/env python3
-
 import re
-from collections import defaultdict
+from collections import defaultdict, deque
 from functools import lru_cache
 from typing import Iterable, List, Tuple
 
@@ -212,12 +210,11 @@ class Extractor:
 
 class Optimizer:
     def __init__(self, *extracted: Extractor) -> None:
-        tokens = tuple(t for e in extracted for t in e.result)
         self._connection = {}
-        self.result = self._compute_regex(tokens)
+        self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
 
     @lru_cache(maxsize=4096)
-    def _compute_regex(self, tokens: Tuple[Tuple[str]]):
+    def _compute_regex(self, tokens: Iterable[Tuple[str]]):
 
         tokenSet = set(tokens)
 
@@ -273,7 +270,9 @@ class Optimizer:
         return f"{tokenSet.pop()[0]}{qmark}"
 
     def _find_min_comb(self, tokenSet: set, lgroup: dict, rgroup: dict, lsegment: dict, rsegment: dict):
+
         result = []
+
         if lgroup or rgroup:
 
             left = defaultdict(list)
@@ -344,62 +343,39 @@ class Optimizer:
         if tokenSet:
             chars = frozenset(i for i in tokenSet if len(i) == 1)
             if chars:
-                string = self._compute_regex(chars)
-                result.append(string)
+                result.append(self._compute_regex(chars))
                 tokenSet.difference_update(chars)
-            string = map("".join, tokenSet)
-            result.extend(string)
+            result.extend(map("".join, tokenSet))
 
         return result
 
-    def _group_keys(self, keys: set):
+    def _group_keys(self, unVisited: set):
         """Group keys with common members together."""
-        unVisited = keys
         groups = []
-        stack = []
+        que = deque()
 
         while unVisited:
             currentVert = unVisited.pop()  # frozenset
-            stack.append(currentVert)
+            que.append(currentVert)
             currentGroup = [currentVert]
             groups.append(currentGroup)
-            while stack:
-                currentVert = stack.pop()
+            while que:
+                currentVert = que.popleft()
                 connected = tuple(i for i in unVisited if not currentVert.isdisjoint(i))
                 unVisited.difference_update(connected)
                 currentGroup.extend(connected)
-                stack.extend(connected)
+                que.extend(connected)
 
         for group in groups:
             group.sort(key=lambda k: self._connection[k][1], reverse=True)
             yield group
 
 
-def main():
-    from sys import argv, exit
+def test_regex(regex: str, wordlist: list):
+    extracted = Extractor(regex).get_text()
+    assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original words."
 
-    if len(argv) > 2:
-        if argv[1] == "-e":
-            for string in argv[2:]:
-                for word in Extractor(string).get_text():
-                    print(word)
-            exit()
-        elif argv[1] == "-c":
-            extractors = (Extractor(i) for i in argv[2:])
-            regex = Optimizer(*extractors).result
-            print(regex)
-            exit()
-        elif argv[1] == "-f":
-            with open(argv[2], "r") as f:
-                wordlist = f.read().splitlines()
-            extractors = (Extractor(i) for i in wordlist)
-            regex = Optimizer(*extractors).result
-            print(regex)
-            print("Length:", len(regex))
-            exit()
-
-    print("-e <regex>: extract regex\n-c <string>: compute regex")
-
-
-if __name__ == "__main__":
-    main()
+    regex = re.compile(regex)
+    for i in wordlist:
+        if not regex.fullmatch(i):
+            assert re.search(r"[*+{}]", i), "Regex matching test failed."
