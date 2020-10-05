@@ -273,9 +273,7 @@ class Optimizer:
         return f"{tokenSet.pop()[0]}{qmark}"
 
     def _find_min_comb(self, tokenSet: set, lgroup: dict, rgroup: dict, lsegment: dict, rsegment: dict):
-
         result = []
-
         if lgroup or rgroup:
 
             left = defaultdict(list)
@@ -346,9 +344,11 @@ class Optimizer:
         if tokenSet:
             chars = frozenset(i for i in tokenSet if len(i) == 1)
             if chars:
-                result.append(self._compute_regex(chars))
+                string = self._compute_regex(chars)
+                result.append(string)
                 tokenSet.difference_update(chars)
-            result.extend(map("".join, tokenSet))
+            string = map("".join, tokenSet)
+            result.extend(string)
 
         return result
 
