@@ -215,6 +215,7 @@ class Optimizer:
         tokens = tuple(t for e in extracted for t in e.result)
         self._connection = {}
         self.result = self._compute_regex(tokens)
+        print(self._compute_regex.cache_info())
 
     @lru_cache(maxsize=4096)
     def _compute_regex(self, tokens: Tuple[Tuple[str]]):
@@ -295,12 +296,18 @@ class Optimizer:
                     try:
                         v = connection[key]
                     except KeyError:
-                        concatLength = sum(sum(len(i) for i in j) for j in key) + len(key) - 1
-                        connection[key] = [val, concatLength, length]
+                        connection[key] = [
+                            tuple(frozenset(i) for i in val),  # Partition
+                            sum(sum(len(i) for i in j) for j in key) + len(key) - 1,  # concatLength
+                            length,  # Partition length
+                            None,  # computed regex string
+                            None,  # reduced length (concatLength - len(string))
+                        ]
                     else:
                         if length < v[2]:
-                            v[0] = val
+                            v[0] = tuple(frozenset(i) for i in val)
                             v[2] = length
+                            v[3] = v[4] = None
 
             compute_regex = self._compute_regex
             for group in self._group_keys(connectionKeys):
@@ -309,14 +316,16 @@ class Optimizer:
                 optimal = None
 
                 for key in group:
-                    v = connection[key]
-                    concatLength = v[1]
-                    if concatLength <= mostReduced:
+                    v = self._connection[key]
+                    if v[1] <= mostReduced:
                         break
+                    string = v[3]
+                    reduced = v[4]
 
-                    left, right = (frozenset(i) for i in v[0])
-                    string = f"{compute_regex(left)}{compute_regex(right)}"
-                    reduced = concatLength - len(string)
+                    if string is None:
+                        left, right = v[0]
+                        string = v[3] = f"{compute_regex(left)}{compute_regex(right)}"
+                        reduced = v[4] = v[1] - len(string)
 
                     if reduced > mostReduced:
                         mostReduced = reduced
@@ -381,14 +390,14 @@ def main():
                     print(word)
             exit()
         elif argv[1] == "-c":
-            extractors = (Extractor(i, optmize=True) for i in argv[2:])
+            extractors = (Extractor(i) for i in argv[2:])
             regex = Optimizer(*extractors).result
             print(regex)
             exit()
         elif argv[1] == "-f":
             with open(argv[2], "r") as f:
                 wordlist = f.read().splitlines()
-            extractors = (Extractor(i, optmize=True) for i in wordlist)
+            extractors = (Extractor(i) for i in wordlist)
             regex = Optimizer(*extractors).result
             print(regex)
             print("Length:", len(regex))
