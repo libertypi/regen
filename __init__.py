@@ -213,7 +213,6 @@ class Optimizer:
     def __init__(self, *extracted: Extractor) -> None:
         self._connection = {}
         self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
-        print(self._compute_regex.cache_info())
 
     @lru_cache(maxsize=4096)
     def _compute_regex(self, tokenSet: Iterable[Tuple[str]]):
