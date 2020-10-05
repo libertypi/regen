@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os.path
 import unittest
 
@@ -73,12 +75,12 @@ class Testregen(unittest.TestCase):
         testDir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../transmission-torrent-done/component/"))
         for file in testFile:
             file = os.path.join(testDir, file)
-            if not os.path.exists(file):
+            try:
+                with open(file, "r") as f:
+                    words = f.read().splitlines()
+            except FileNotFoundError:
                 print(file, "Not Found!")
                 continue
-
-            with open(file) as f:
-                words = f.read().splitlines()
             words.sort()
 
             e = (Extractor(i) for i in words)

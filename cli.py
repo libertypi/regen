@@ -26,7 +26,7 @@ def main():
             print("Length:", len(regex))
             exit()
 
-    print("-e <regex>: extract regex\n-c <string>: compute regex")
+    print("-e <regex>: extract regex\n-c <string>: compute regex\n-f <file>: compute regex from file")
 
 
 if __name__ == "__main__":
