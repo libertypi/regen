@@ -1,6 +1,7 @@
 import re
 from collections import defaultdict, deque
 from functools import lru_cache
+from itertools import filterfalse
 from typing import Iterable, List, Tuple
 
 
@@ -279,8 +280,7 @@ class Optimizer:
             right = defaultdict(list)
             for group, segment, target in (lgroup, lsegment, left), (rgroup, rsegment, right):
                 for k, v in group.items():
-                    key = frozenset(segment[i][k] for i in v)
-                    target[key].append(k)
+                    target[frozenset(segment[i][k] for i in v)].append(k)
 
             connection = self._connection
             connectionKeys = set()
@@ -294,13 +294,12 @@ class Optimizer:
                     try:
                         v = connection[key]
                     except KeyError:
-                        connection[key] = [
-                            val,  # Partition
-                            sum(sum(len(i) for i in j) for j in key) + len(key) - 1,  # concatLength
-                            length,  # Partition length
-                            None,  # computed regex string
-                            None,  # reduced length (concatLength - len(string))
-                        ]
+                        # [0]: Partition
+                        # [1]: concatLength
+                        # [2]: Partition length
+                        # [3]: computed regex string
+                        # [4]: reduced: ( v[1] - len(v[3]), -v[1] )
+                        connection[key] = [val, sum(len(j) for i in key for j in i) + len(key) - 1, length, None, None]
                     else:
                         if length < v[2]:
                             v[0] = val
@@ -310,18 +309,18 @@ class Optimizer:
             compute_regex = self._compute_regex
             for group in self._group_keys(connectionKeys):
 
-                mostReduced = -1
+                mostReduced = (-1, 0)
                 optimal = None
 
                 for key in group:
                     v = connection[key]
-                    if v[1] <= mostReduced:
+                    if v[1] <= mostReduced[0]:
                         break
 
                     if v[3] is None:
                         left, right = (frozenset(i) for i in v[0])
                         v[3] = f"{compute_regex(left)}{compute_regex(right)}"
-                        v[4] = v[1] - len(v[3])
+                        v[4] = (v[1] - len(v[3]), -v[1])
 
                     if v[4] > mostReduced:
                         mostReduced = v[4]
@@ -361,14 +360,14 @@ class Optimizer:
             groups.append(currentGroup)
             while que:
                 currentVert = que.popleft()
-                connected = tuple(i for i in unVisited if not currentVert.isdisjoint(i))
+                connected = tuple(filterfalse(currentVert.isdisjoint, unVisited))
                 unVisited.difference_update(connected)
                 currentGroup.extend(connected)
                 que.extend(connected)
 
         for group in groups:
             group.sort(key=lambda k: self._connection[k][1], reverse=True)
-            yield group
+        return groups
 
 
 def test_regex(regex: str, wordlist: list):
@@ -376,6 +375,5 @@ def test_regex(regex: str, wordlist: list):
     assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original words."
 
     regex = re.compile(regex)
-    for i in wordlist:
-        if not regex.fullmatch(i):
-            assert re.search(r"[*+{}]", i), "Regex matching test failed."
+    for i in filterfalse(regex.fullmatch, wordlist):
+        assert re.search(r"[*+{}]", i), "Regex matching test failed."
