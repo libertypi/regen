@@ -3,7 +3,7 @@
 import os.path
 import unittest
 
-from __init__ import Extractor, Optimizer, Tokenizer
+from __init__ import Extractor, Optimizer, Tokenizer, test_regex
 
 
 class Testregen(unittest.TestCase):
@@ -81,12 +81,10 @@ class Testregen(unittest.TestCase):
             except FileNotFoundError:
                 print(file, "Not Found!")
                 continue
-            words.sort()
 
             e = (Extractor(i) for i in words)
             r = Optimizer(*e).result
-            e = sorted(Extractor(r).get_text())
-            self.assertEqual(words, e)
+            test_regex(r, words)
 
 
 if __name__ == "__main__":
