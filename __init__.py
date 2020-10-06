@@ -2,7 +2,7 @@ import re
 from collections import defaultdict, deque
 from functools import lru_cache
 from itertools import filterfalse
-from typing import Iterable, List, Tuple
+from typing import Iterable, List
 
 
 class Tokenizer:
@@ -219,7 +219,7 @@ class Optimizer:
         self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
 
     @lru_cache(maxsize=4096)
-    def _compute_regex(self, tokenSet: Iterable[Tuple[str]]):
+    def _compute_regex(self, tokenSet):
 
         tokenSet = set(tokenSet)
 
@@ -259,76 +259,71 @@ class Optimizer:
 
             lgroup = self._filter_group(lgroup)
             rgroup = self._filter_group(rgroup)
-            que.append((tokenSet, lgroup, rgroup))
+            que.append((lgroup, rgroup))
 
             while que:
 
-                tokenSet, lgroup, rgroup = que.popleft()
+                lgroup, rgroup = que.popleft()
+                if not (lgroup or rgroup):
+                    continue
 
-                if lgroup or rgroup:
-                    for group, target, i in (lgroup, lgroupReverse, 0), (rgroup, rgroupReverse, 1):
-                        for k, v in group.items():
-                            target[frozenset(segment[j][i][k] for j in v)].append(k)
+                for group, target, i in (lgroup, lgroupReverse, 0), (rgroup, rgroupReverse, 1):
+                    for k, v in group.items():
+                        target[frozenset(segment[j][i][k] for j in v)].append(k)
 
-                    left = ((frozenset(j for i in v for j in lgroup[i]), k, v) for k, v in lgroupReverse.items())
-                    right = ((frozenset(j for i in v for j in rgroup[i]), v, k) for k, v in rgroupReverse.items())
+                left = ((frozenset(j for i in v for j in lgroup[i]), k, v) for k, v in lgroupReverse.items())
+                right = ((frozenset(j for i in v for j in rgroup[i]), v, k) for k, v in rgroupReverse.items())
 
-                    for target in (left, right):
-                        for key, i, j in target:
-                            connectionKeys.add(key)
-                            if key not in connection:
-                                # [0]: Partition
-                                # [1]: concatLength
-                                # [2]: computed regex string
-                                # [3]: rank: ( v[1] - len(v[2]), -v[1] )
-                                connection[key] = [
-                                    (i, j),
-                                    sum(len(j) for i in key for j in i) + len(key) - 1,
-                                    None,
-                                    None,
-                                ]
-
-                    for group in self._group_keys(connectionKeys):
-
-                        bestRank = (-1, 0)
-                        optimal = None
-
-                        for key in group:
-                            v = connection[key]
-                            if v[1] <= bestRank[0]:
-                                break
-
-                            if v[2] is None:
-                                left, right = (frozenset(i) for i in v[0])
-                                v[2] = f"{self._compute_regex(left)}{self._compute_regex(right)}"
-                                v[3] = (v[1] - len(v[2]), -v[1])
-
-                            if v[3] > bestRank:
-                                bestRank = v[3]
-                                optimal = key
-
-                        try:
-                            result.append(connection[optimal][2])
-                        except KeyError:
-                            continue
-
-                        subTokenSet = {j for i in group for j in i}
-                        tokenSet.difference_update(subTokenSet)
-                        subTokenSet.difference_update(optimal)
-                        if subTokenSet:
-                            subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
-                            subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
-                            que.append((subTokenSet, subLgroup, subRgroup))
-
-                if tokenSet:
-                    chars = frozenset(i for i in tokenSet if len(i) == 1)
-                    if chars:
-                        result.append(self._compute_regex(chars))
-                        tokenSet.difference_update(chars)
-                    result.extend(map("".join, tokenSet))
+                for target in (left, right):
+                    for key, i, j in target:
+                        connectionKeys.add(key)
+                        if key not in connection:
+                            # [0]: Partition
+                            # [1]: concatLength
+                            # [2]: computed regex string
+                            # [3]: rank: ( v[1] - len(v[2]), -v[1] )
+                            connection[key] = [(i, j), sum(len(j) for i in key for j in i) + len(key) - 1, None, None]
 
                 lgroupReverse.clear()
                 rgroupReverse.clear()
+
+                for group in self._group_keys(connectionKeys):
+
+                    bestRank = (-1, 0)
+                    optimal = None
+
+                    for key in group:
+                        v = connection[key]
+                        if v[1] <= bestRank[0]:
+                            break
+
+                        if v[2] is None:
+                            left, right = (frozenset(i) for i in v[0])
+                            v[2] = f"{self._compute_regex(left)}{self._compute_regex(right)}"
+                            v[3] = (v[1] - len(v[2]), -v[1])
+
+                        if v[3] > bestRank:
+                            bestRank = v[3]
+                            optimal = key
+
+                    try:
+                        result.append(connection[optimal][2])
+                    except KeyError:
+                        continue
+
+                    tokenSet.difference_update(optimal)
+                    subTokenSet = {j for i in group for j in i if j not in optimal}
+                    if subTokenSet:
+                        subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
+                        subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
+                        que.append((subLgroup, subRgroup))
+
+            if tokenSet:
+                chars = frozenset(i for i in tokenSet if len(i) == 1)
+                if chars:
+                    result.append(self._compute_regex(chars))
+                    tokenSet.difference_update(chars)
+                result.extend(map("".join, tokenSet))
 
             result.sort()
             string = "|".join(result)
