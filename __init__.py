@@ -210,10 +210,13 @@ class Extractor:
 
 
 class Optimizer:
+
+    charSetFront = tuple((c,) for c in "]^")
+    charSetEnd = tuple((c,) for c in "-")
+
     def __init__(self, *extracted: Extractor) -> None:
         self._connection = {}
         self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
-        print(self._compute_regex.cache_info())
 
     @lru_cache(maxsize=4096)
     def _compute_regex(self, tokenSet: Iterable[Tuple[str]]):
@@ -248,7 +251,7 @@ class Optimizer:
                 left = {token[i:]: token[:i] for i in range(1, len(token))}
                 right = {v: k for k, v in left.items()}
                 left[token] = right[token] = ()
-                segment[token] = left, right
+                segment[token] = (left, right)
                 for k in left:
                     lgroup[k].add(token)
                 for k in right:
@@ -267,19 +270,19 @@ class Optimizer:
                         for k, v in group.items():
                             target[frozenset(segment[j][i][k] for j in v)].append(k)
 
-                    left = ((frozenset(j for i in v for j in lgroup[i]), (k, v)) for k, v in lgroupReverse.items())
-                    right = ((frozenset(j for i in v for j in rgroup[i]), (v, k)) for k, v in rgroupReverse.items())
+                    left = ((frozenset(j for i in v for j in lgroup[i]), k, v) for k, v in lgroupReverse.items())
+                    right = ((frozenset(j for i in v for j in rgroup[i]), v, k) for k, v in rgroupReverse.items())
 
-                    for i in (left, right):
-                        for key, val in i:
+                    for target in (left, right):
+                        for key, i, j in target:
                             connectionKeys.add(key)
                             if key not in connection:
                                 # [0]: Partition
                                 # [1]: concatLength
                                 # [2]: computed regex string
-                                # [3]: reduced: ( v[1] - len(v[2]), -v[1] )
+                                # [3]: rank: ( v[1] - len(v[2]), -v[1] )
                                 connection[key] = [
-                                    val,
+                                    (i, j),
                                     sum(len(j) for i in key for j in i) + len(key) - 1,
                                     None,
                                     None,
@@ -287,12 +290,12 @@ class Optimizer:
 
                     for group in self._group_keys(connectionKeys):
 
-                        mostReduced = (-1, 0)
+                        bestRank = (-1, 0)
                         optimal = None
 
                         for key in group:
                             v = connection[key]
-                            if v[1] <= mostReduced[0]:
+                            if v[1] <= bestRank[0]:
                                 break
 
                             if v[2] is None:
@@ -300,8 +303,8 @@ class Optimizer:
                                 v[2] = f"{self._compute_regex(left)}{self._compute_regex(right)}"
                                 v[3] = (v[1] - len(v[2]), -v[1])
 
-                            if v[3] > mostReduced:
-                                mostReduced = v[3]
+                            if v[3] > bestRank:
+                                bestRank = v[3]
                                 optimal = key
 
                         try:
@@ -337,16 +340,20 @@ class Optimizer:
 
         elif len(tokenSet) > 1:
             char = sorted(i[0] for i in tokenSet)
-            if ("-",) in tokenSet:
-                char.append(char.pop(char.index("-")))
-            if ("]",) in tokenSet:
-                char.insert(0, char.pop(char.index("]")))
+
+            for c in tokenSet.intersection(self.charSetFront):
+                char.insert(0, char.pop(char.index(c[0])))
+            for c in tokenSet.intersection(self.charSetEnd):
+                char.append(char.pop(char.index(c[0])))
+
             return f'[{"".join(char)}]{qmark}'
 
         return f"{tokenSet.pop()[0]}{qmark}"
 
     def _group_keys(self, connectionKeys: set):
-        """Group keys with common members together."""
+        """Group keys with common members together.
+
+        The input set will be emptied."""
         groups = []
         que = deque()
 
@@ -360,6 +367,8 @@ class Optimizer:
                 connected = tuple(filterfalse(currentVert.isdisjoint, connectionKeys))
                 connectionKeys.difference_update(connected)
                 currentGroup.extend(connected)
+                if not connectionKeys:
+                    break
                 que.extend(connected)
 
         for group in groups:
@@ -371,8 +380,9 @@ class Optimizer:
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
         Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC)
-        the first will be keeped.
+        only the first item will be keeped.
         """
+
         tmp = {}
         for k, v in d.items():
             if len(v) <= 1:
@@ -385,7 +395,8 @@ class Optimizer:
             except KeyError:
                 pass
             tmp[key] = length, k
-        return {k[1]: d[k[1]] for k in tmp.values()}
+
+        return {v[1]: d[v[1]] for v in tmp.values()}
 
 
 def test_regex(regex: str, wordlist: list):
