@@ -213,6 +213,7 @@ class Optimizer:
     def __init__(self, *extracted: Extractor) -> None:
         self._connection = {}
         self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
+        print(self._compute_regex.cache_info())
 
     @lru_cache(maxsize=4096)
     def _compute_regex(self, tokenSet: Iterable[Tuple[str]]):
@@ -239,8 +240,7 @@ class Optimizer:
             rgroup = defaultdict(set)
             lgroupReverse = defaultdict(list)
             rgroupReverse = defaultdict(list)
-            lsegment = {}
-            rsegment = {}
+            segment = {}
             connection = self._connection
             connectionKeys = set()
 
@@ -248,15 +248,14 @@ class Optimizer:
                 left = {token[i:]: token[:i] for i in range(1, len(token))}
                 right = {v: k for k, v in left.items()}
                 left[token] = right[token] = ()
-                lsegment[token] = left
-                rsegment[token] = right
+                segment[token] = left, right
                 for k in left:
                     lgroup[k].add(token)
                 for k in right:
                     rgroup[k].add(token)
 
-            lgroup = {k: v for k, v in lgroup.items() if len(v) > 1}
-            rgroup = {k: v for k, v in rgroup.items() if len(v) > 1}
+            lgroup = self._filter_group(lgroup)
+            rgroup = self._filter_group(rgroup)
             que.append((tokenSet, lgroup, rgroup))
 
             while que:
@@ -264,9 +263,9 @@ class Optimizer:
                 tokenSet, lgroup, rgroup = que.popleft()
 
                 if lgroup or rgroup:
-                    for group, segment, target in (lgroup, lsegment, lgroupReverse), (rgroup, rsegment, rgroupReverse):
+                    for group, target, i in (lgroup, lgroupReverse, 0), (rgroup, rgroupReverse, 1):
                         for k, v in group.items():
-                            target[frozenset(segment[i][k] for i in v)].append(k)
+                            target[frozenset(segment[j][i][k] for j in v)].append(k)
 
                     left = ((frozenset(j for i in v for j in lgroup[i]), (k, v)) for k, v in lgroupReverse.items())
                     right = ((frozenset(j for i in v for j in rgroup[i]), (v, k)) for k, v in rgroupReverse.items())
@@ -274,27 +273,17 @@ class Optimizer:
                     for i in (left, right):
                         for key, val in i:
                             connectionKeys.add(key)
-                            length = sum(len(j) for i in val for j in i)
-                            try:
-                                v = connection[key]
-                            except KeyError:
+                            if key not in connection:
                                 # [0]: Partition
                                 # [1]: concatLength
-                                # [2]: Partition length
-                                # [3]: computed regex string
-                                # [4]: reduced: ( v[1] - len(v[3]), -v[1] )
+                                # [2]: computed regex string
+                                # [3]: reduced: ( v[1] - len(v[2]), -v[1] )
                                 connection[key] = [
                                     val,
                                     sum(len(j) for i in key for j in i) + len(key) - 1,
-                                    length,
                                     None,
                                     None,
                                 ]
-                            else:
-                                if length < v[2]:
-                                    v[0] = val
-                                    v[2] = length
-                                    v[3] = v[4] = None
 
                     for group in self._group_keys(connectionKeys):
 
@@ -306,17 +295,17 @@ class Optimizer:
                             if v[1] <= mostReduced[0]:
                                 break
 
-                            if v[3] is None:
+                            if v[2] is None:
                                 left, right = (frozenset(i) for i in v[0])
-                                v[3] = f"{self._compute_regex(left)}{self._compute_regex(right)}"
-                                v[4] = (v[1] - len(v[3]), -v[1])
+                                v[2] = f"{self._compute_regex(left)}{self._compute_regex(right)}"
+                                v[3] = (v[1] - len(v[2]), -v[1])
 
-                            if v[4] > mostReduced:
-                                mostReduced = v[4]
+                            if v[3] > mostReduced:
+                                mostReduced = v[3]
                                 optimal = key
 
                         try:
-                            result.append(connection[optimal][3])
+                            result.append(connection[optimal][2])
                         except KeyError:
                             continue
 
@@ -376,6 +365,27 @@ class Optimizer:
         for group in groups:
             group.sort(key=lambda k: self._connection[k][1], reverse=True)
         return groups
+
+    @staticmethod
+    def _filter_group(d: dict):
+        """Keep groups which divide the same words at max common subsequence, and remove single member groups.
+
+        Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC)
+        the first will be keeped.
+        """
+        tmp = {}
+        for k, v in d.items():
+            if len(v) <= 1:
+                continue
+            key = frozenset(v)
+            length = len(k)
+            try:
+                if tmp[key][0] > length:
+                    continue
+            except KeyError:
+                pass
+            tmp[key] = length, k
+        return {k[1]: d[k[1]] for k in tmp.values()}
 
 
 def test_regex(regex: str, wordlist: list):
