@@ -211,8 +211,8 @@ class Extractor:
 
 class Optimizer:
 
-    charSetFront = tuple((c,) for c in "]^")
-    charSetEnd = tuple((c,) for c in "-")
+    _charSetFront = tuple((c,) for c in "]^")
+    _charSetEnd = tuple((c,) for c in "-")
 
     def __init__(self, *extracted: Extractor) -> None:
         self._connection = {}
@@ -336,9 +336,9 @@ class Optimizer:
         elif len(tokenSet) > 1:
             char = sorted(i[0] for i in tokenSet)
 
-            for c in tokenSet.intersection(self.charSetFront):
+            for c in tokenSet.intersection(self._charSetFront):
                 char.insert(0, char.pop(char.index(c[0])))
-            for c in tokenSet.intersection(self.charSetEnd):
+            for c in tokenSet.intersection(self._charSetEnd):
                 char.append(char.pop(char.index(c[0])))
 
             return f'[{"".join(char)}]{qmark}'
