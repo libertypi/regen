@@ -413,7 +413,7 @@ class Optimizer:
                 solver.Add(currentVar + pool[k] <= 1)
 
         if solver.Solve() != solver.OPTIMAL:
-            raise RuntimeError("CBC Solver failed.")
+            raise RuntimeError("MIP Solver failed.")
 
         for k, v in pool.items():
             if v.solution_value() == 1:
