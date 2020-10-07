@@ -286,9 +286,9 @@ class Optimizer:
                         if key not in connection:
                             # [0]: prefix
                             # [1]: suffix
-                            # [2]: concatLength + 0.5, then reduced length: concatLength - stringLength
+                            # [2]: concatLength + 0.1, then reduced length: concatLength - stringLength
                             # [3]: computed regex string
-                            connection[key] = [i, j, sum(map(len, chain(*key))) + len(key) - 0.5, None]
+                            connection[key] = [i, j, sum(map(len, chain(*key))) + len(key) - 0.9, None]
 
                 lgroupReverse.clear()
                 rgroupReverse.clear()
