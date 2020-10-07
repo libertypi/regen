@@ -362,7 +362,7 @@ class Optimizer:
             key = frozenset(v)
             length = len(k)
             try:
-                if tmp[key][0] > length:
+                if tmp[key][0] >= length:
                     continue
             except KeyError:
                 pass
