@@ -1,8 +1,10 @@
 import re
 from collections import defaultdict, deque
 from functools import lru_cache
-from itertools import filterfalse
-from typing import Iterable, List
+from itertools import chain, filterfalse
+from typing import FrozenSet, Iterable, List, Set, Tuple
+
+from ortools.linear_solver.pywraplp import Solver
 
 
 class Tokenizer:
@@ -184,14 +186,14 @@ class Extractor:
         self.result = tuple(map(tuple, result))
 
     @staticmethod
-    def _concat(hold: list, subresult: List[list]):
+    def _concat(hold: List, subresult: List[List]):
         if hold:
             for s in subresult:
                 s.extend(hold)
             hold.clear()
 
     @classmethod
-    def _transfer(cls, hold: list, subresult: List[list], result: List[list]):
+    def _transfer(cls, hold: List, subresult: List[List], result: List[List]):
         """Concat hold with subresult, then transfer subresult to self.result."""
         cls._concat(hold, subresult)
         result.extend(subresult)
@@ -216,10 +218,12 @@ class Optimizer:
 
     def __init__(self, *extracted: Extractor) -> None:
         self._connection = {}
+        self.solver = Solver.CreateSolver("RegexOptimizer", "CBC")
         self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
+        del self._connection
 
     @lru_cache(maxsize=4096)
-    def _compute_regex(self, tokenSet):
+    def _compute_regex(self, tokenSet: FrozenSet[Tuple[str]]) -> str:
 
         tokenSet = set(tokenSet)
 
@@ -246,6 +250,8 @@ class Optimizer:
             segment = {}
             connection = self._connection
             connectionKeys = set()
+            subResult = []
+            subTokenSet = set()
 
             for token in tokenSet:
                 left = {token[i:]: token[:i] for i in range(1, len(token))}
@@ -278,45 +284,42 @@ class Optimizer:
                     for key, i, j in target:
                         connectionKeys.add(key)
                         if key not in connection:
-                            # [0]: Partition
-                            # [1]: concatLength
-                            # [2]: computed regex string
-                            # [3]: rank: ( v[1] - len(v[2]), -v[1] )
-                            connection[key] = [(i, j), sum(len(j) for i in key for j in i) + len(key) - 1, None, None]
+                            # [0]: prefix
+                            # [1]: suffix
+                            # [2]: concatLength + 0.5, then reduced length: concatLength - stringLength
+                            # [3]: computed regex string
+                            connection[key] = [i, j, sum(map(len, chain(*key))) + len(key) - 0.5, None]
 
                 lgroupReverse.clear()
                 rgroupReverse.clear()
 
                 for group in self._group_keys(connectionKeys):
 
-                    bestRank = (-1, 0)
-                    optimal = None
-
                     for key in group:
                         v = connection[key]
-                        if v[1] <= bestRank[0]:
-                            break
 
-                        if v[2] is None:
-                            left, right = (frozenset(i) for i in v[0])
-                            v[2] = f"{self._compute_regex(left)}{self._compute_regex(right)}"
-                            v[3] = (v[1] - len(v[2]), -v[1])
+                        if v[3] is None:
+                            v[3] = f"{self._compute_regex(frozenset(v[0]))}{self._compute_regex(frozenset(v[1]))}"
+                            v[2] -= len(v[3])
 
-                        if v[3] > bestRank:
-                            bestRank = v[3]
-                            optimal = key
+                        if v[2] > 0:
+                            subResult.append(key)
 
-                    try:
-                        result.append(connection[optimal][2])
-                    except KeyError:
+                    if not subResult:
                         continue
 
-                    tokenSet.difference_update(optimal)
-                    subTokenSet = {j for i in group for j in i if j not in optimal}
+                    subTokenSet.update(chain(*group))
+
+                    for key in self._mip_solver(subResult):
+                        result.append(connection[key][3])
+                        subTokenSet.difference_update(key)
+                        tokenSet.difference_update(key)
+
                     if subTokenSet:
                         subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
                         subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
                         que.append((subLgroup, subRgroup))
+                        subTokenSet.clear()
 
             if tokenSet:
                 chars = frozenset(i for i in tokenSet if len(i) == 1)
@@ -334,7 +337,7 @@ class Optimizer:
             return string
 
         elif len(tokenSet) > 1:
-            char = sorted(i[0] for i in tokenSet)
+            char = sorted(chain(*tokenSet))
 
             for c in tokenSet.intersection(self._charSetFront):
                 char.insert(0, char.pop(char.index(c[0])))
@@ -345,31 +348,6 @@ class Optimizer:
 
         return f"{tokenSet.pop()[0]}{qmark}"
 
-    def _group_keys(self, connectionKeys: set):
-        """Group keys with common members together.
-
-        The input set will be emptied."""
-        groups = []
-        que = deque()
-
-        while connectionKeys:
-            currentVert = connectionKeys.pop()  # frozenset
-            que.append(currentVert)
-            currentGroup = [currentVert]
-            groups.append(currentGroup)
-            while que:
-                currentVert = que.popleft()
-                connected = tuple(filterfalse(currentVert.isdisjoint, connectionKeys))
-                connectionKeys.difference_update(connected)
-                currentGroup.extend(connected)
-                if not connectionKeys:
-                    break
-                que.extend(connected)
-
-        for group in groups:
-            group.sort(key=lambda k: self._connection[k][1], reverse=True)
-        return groups
-
     @staticmethod
     def _filter_group(d: dict):
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
@@ -377,7 +355,6 @@ class Optimizer:
         Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC)
         only the first item will be keeped.
         """
-
         tmp = {}
         for k, v in d.items():
             if len(v) <= 1:
@@ -393,6 +370,57 @@ class Optimizer:
 
         return {v[1]: d[v[1]] for v in tmp.values()}
 
+    @staticmethod
+    def _group_keys(connectionKeys: Set[FrozenSet]):
+        """Group keys with common members together.
+
+        The input set will be emptied."""
+        que = deque()
+        while connectionKeys:
+            currentVert = connectionKeys.pop()
+            que.append(currentVert)
+            currentGroup = [currentVert]
+            while que:
+                currentVert = que.popleft()
+                connected = tuple(filterfalse(currentVert.isdisjoint, connectionKeys))
+                connectionKeys.difference_update(connected)
+                currentGroup.extend(connected)
+                if not connectionKeys:
+                    break
+                que.extend(connected)
+            yield currentGroup
+
+    def _mip_solver(self, subResult: List[FrozenSet]):
+        """Find the non-overlapping group with the maximum sum of length reduction.
+
+        The input list will be emptied."""
+
+        if len(subResult) == 1:
+            yield subResult.pop()
+            return
+
+        solver = self.solver
+        connection = self._connection
+        pool = {k: solver.BoolVar(str(i)) for i, k in enumerate(subResult)}
+        objective = solver.Objective()
+        objective.SetMaximization()
+
+        while subResult:
+            currentkey = subResult.pop()
+            currentVar = pool[currentkey]
+            objective.SetCoefficient(currentVar, connection[currentkey][2])
+            for k in filterfalse(currentkey.isdisjoint, subResult):
+                solver.Add(currentVar + pool[k] <= 1)
+
+        if solver.Solve() != solver.OPTIMAL:
+            raise RuntimeError("CBC Solver failed.")
+
+        for k, v in pool.items():
+            if v.solution_value() == 1:
+                yield k
+
+        solver.Clear()
+
 
 def test_regex(regex: str, wordlist: list):
     extracted = Extractor(regex).get_text()
@@ -400,4 +428,4 @@ def test_regex(regex: str, wordlist: list):
 
     regex = re.compile(regex)
     for i in filterfalse(regex.fullmatch, wordlist):
-        assert re.search(r"[*+{}]", i), "Regex matching test failed."
+        assert re.search(r"[*+{}]", i), f"Regex matching test failed: '{i}'"
