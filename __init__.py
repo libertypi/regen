@@ -217,8 +217,8 @@ class Optimizer:
     _charSetEnd = tuple((c,) for c in "-")
 
     def __init__(self, *extracted: Extractor) -> None:
-        self._lgroupReverse = defaultdict(list)
-        self._rgroupReverse = defaultdict(list)
+        self._lgroupMirror = defaultdict(list)
+        self._rgroupMirror = defaultdict(list)
         self.solver = pywraplp.Solver.CreateSolver("RegexOptimizer", "CBC")
         self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
 
@@ -247,8 +247,8 @@ class Optimizer:
             que = deque()
             lgroup = defaultdict(set)
             rgroup = defaultdict(set)
-            lgroupReverse = self._lgroupReverse
-            rgroupReverse = self._rgroupReverse
+            lgroupMirror = self._lgroupMirror
+            rgroupMirror = self._rgroupMirror
             segment = {}
             connection = {}
             connectionKeys = set()
@@ -275,12 +275,12 @@ class Optimizer:
                 if not (lgroup or rgroup):
                     continue
 
-                for group, target, i in (lgroup, lgroupReverse, 0), (rgroup, rgroupReverse, 1):
+                for group, target, i in (lgroup, lgroupMirror, 0), (rgroup, rgroupMirror, 1):
                     for k, v in group.items():
                         target[frozenset(segment[j][i][k] for j in v)].append(k)
 
-                left = ((frozenset(chain.from_iterable(lgroup[i] for i in v)), k, v) for k, v in lgroupReverse.items())
-                right = ((frozenset(chain.from_iterable(rgroup[i] for i in v)), v, k) for k, v in rgroupReverse.items())
+                left = ((frozenset(chain.from_iterable(lgroup[i] for i in v)), k, v) for k, v in lgroupMirror.items())
+                right = ((frozenset(chain.from_iterable(rgroup[i] for i in v)), v, k) for k, v in rgroupMirror.items())
 
                 for key, i, j in chain(left, right):
                     connectionKeys.add(key)
@@ -291,8 +291,8 @@ class Optimizer:
                         # [3]: value: concatLength - stringLength - keyLength * 0.001
                         connection[key] = [i, j, None, None]
 
-                lgroupReverse.clear()
-                rgroupReverse.clear()
+                lgroupMirror.clear()
+                rgroupMirror.clear()
 
                 for group in self._group_keys(connectionKeys):
 
