@@ -2,7 +2,7 @@ import re
 from collections import defaultdict, deque
 from functools import lru_cache
 from itertools import chain, filterfalse
-from typing import FrozenSet, Iterable, List, Set, Tuple, Dict
+from typing import Dict, FrozenSet, Iterable, List, Set, Tuple
 
 from ortools.linear_solver import pywraplp
 
@@ -220,7 +220,7 @@ class Optimizer:
         self._lgroupReverse = defaultdict(list)
         self._rgroupReverse = defaultdict(list)
         self.solver = pywraplp.Solver.CreateSolver("RegexOptimizer", "CBC")
-        self.result = self._compute_regex(frozenset(t for e in extracted for t in e.result))
+        self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
 
     @lru_cache(maxsize=4096)
     def _compute_regex(self, tokenSet: FrozenSet[Tuple[str]]) -> str:
@@ -279,8 +279,8 @@ class Optimizer:
                     for k, v in group.items():
                         target[frozenset(segment[j][i][k] for j in v)].append(k)
 
-                left = ((frozenset(j for i in v for j in lgroup[i]), k, v) for k, v in lgroupReverse.items())
-                right = ((frozenset(j for i in v for j in rgroup[i]), v, k) for k, v in rgroupReverse.items())
+                left = ((frozenset(chain.from_iterable(lgroup[i] for i in v)), k, v) for k, v in lgroupReverse.items())
+                right = ((frozenset(chain.from_iterable(rgroup[i] for i in v)), v, k) for k, v in rgroupReverse.items())
 
                 for key, i, j in chain(left, right):
                     connectionKeys.add(key)
