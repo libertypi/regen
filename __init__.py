@@ -111,7 +111,7 @@ class Extractor:
                 while True:
                     char = token.eat()
                     if not char:
-                        raise ValueError(f"Bad charactor set: {self._get_string()}")
+                        raise ValueError(f"Bad character set: {self._get_string()}")
                     if char == "[":
                         raise ValueError(f"Nested character set: {self._get_string()}")
                     if char == "]" and charset:
@@ -168,7 +168,7 @@ class Extractor:
                     hold.append(char)
 
             elif char in repetitions:
-                raise ValueError(f"Invalid charactor '{char}': {self._get_string()}")
+                raise ValueError(f"Invalid character '{char}': {self._get_string()}")
 
             else:
                 suffix = token.eat_suffix()
@@ -217,7 +217,10 @@ class Optimizer:
     _charSetEnd = tuple((c,) for c in "-")
 
     def __init__(self, *extracted: Extractor) -> None:
-        self.solver = pywraplp.Solver.CreateSolver("RegexOptimizer", "CBC")
+        self._solver = pywraplp.Solver.CreateSolver("RegexOptimizer", "CBC")
+        self._solverPool = {}
+        self._solverQue = deque()
+        self._subTokenSet = set()
         self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
 
     @lru_cache(maxsize=4096)
@@ -250,7 +253,7 @@ class Optimizer:
             segment = {}
             connection = {}
             connectionKeys = set()
-            subTokenSet = set()
+            subTokenSet = self._subTokenSet
 
             for token in tokenSet:
                 left = {token[i:]: token[:i] for i in range(1, len(token))}
@@ -293,6 +296,7 @@ class Optimizer:
                 rgroupMirror.clear()
 
                 for group, optimal in self._group_optimize(connectionKeys, connection):
+
                     subTokenSet.update(group)
                     for key in optimal:
                         result.append(connection[key][1])
@@ -359,9 +363,9 @@ class Optimizer:
         members. Then for each group, find the best non-overlapping members to reach the maximum length
         reduction."""
 
-        que = deque()
-        pool = {}
-        solver = self.solver
+        que = self._solverQue
+        solver = self._solver
+        pool = self._solverPool
 
         while unvisited:
             objective = solver.Objective()
@@ -411,7 +415,7 @@ class Optimizer:
 
                 yield chain.from_iterable(pool), optimal
 
-            solver.Clear()
+                solver.Clear()
             pool.clear()
 
 
@@ -419,6 +423,6 @@ def test_regex(regex: str, wordlist: List[str]):
     extracted = Extractor(regex).get_text()
     assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original words."
 
-    regex = re.compile(regex)
-    for i in filterfalse(regex.fullmatch, wordlist):
+    pattern = re.compile(regex)
+    for i in filterfalse(pattern.fullmatch, wordlist):
         assert re.search(r"[*+{}]", i), f"Regex matching test failed: '{i}'"
