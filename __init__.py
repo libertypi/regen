@@ -217,8 +217,6 @@ class Optimizer:
     _charSetEnd = tuple((c,) for c in "-")
 
     def __init__(self, *extracted: Extractor) -> None:
-        self._lgroupMirror = defaultdict(list)
-        self._rgroupMirror = defaultdict(list)
         self.solver = pywraplp.Solver.CreateSolver("RegexOptimizer", "CBC")
         self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
 
@@ -247,12 +245,11 @@ class Optimizer:
             que = deque()
             lgroup = defaultdict(set)
             rgroup = defaultdict(set)
-            lgroupMirror = self._lgroupMirror
-            rgroupMirror = self._rgroupMirror
+            lgroupMirror = defaultdict(list)
+            rgroupMirror = defaultdict(list)
             segment = {}
             connection = {}
             connectionKeys = set()
-            subResult = []
             subTokenSet = set()
 
             for token in tokenSet:
@@ -283,39 +280,22 @@ class Optimizer:
                 right = ((frozenset(chain.from_iterable(rgroup[i] for i in v)), v, k) for k, v in rgroupMirror.items())
 
                 for key, i, j in chain(left, right):
-                    connectionKeys.add(key)
                     if key not in connection:
-                        # [0]: prefix
-                        # [1]: suffix
-                        # [2]: computed regex string
-                        # [3]: value: concatLength - stringLength - keyLength * 0.001
-                        connection[key] = [i, j, None, None]
+                        string = f"{self._compute_regex(frozenset(i))}{self._compute_regex(frozenset(j))}"
+                        length = len(key)
+                        value = sum(map(len, chain.from_iterable(key))) + 0.999 * length - len(string) - 1
+                        if length == tokenSetLength:
+                            value += 2
+                        connection[key] = (value, string)
+                    connectionKeys.add(key)
 
                 lgroupMirror.clear()
                 rgroupMirror.clear()
 
-                for group in self._group_keys(connectionKeys):
-
-                    for key in group:
-                        v = connection[key]
-
-                        if v[2] is None:
-                            v[2] = f"{self._compute_regex(frozenset(v[0]))}{self._compute_regex(frozenset(v[1]))}"
-                            length = len(key)
-                            v[3] = sum(map(len, chain.from_iterable(key))) + 0.999 * length - len(v[2]) - 1
-                            if length == tokenSetLength:
-                                v[3] += 2
-
-                        if v[3] > 0:
-                            subResult.append(key)
-
-                    if not subResult:
-                        continue
-
-                    subTokenSet.update(chain.from_iterable(group))
-
-                    for key in self._mip_solver(subResult, connection):
-                        result.append(connection[key][2])
+                for group, optimal in self._group_optimize(connectionKeys, connection):
+                    subTokenSet.update(group)
+                    for key in optimal:
+                        result.append(connection[key][1])
                         subTokenSet.difference_update(key)
                         tokenSet.difference_update(key)
 
@@ -374,55 +354,65 @@ class Optimizer:
 
         return {v[1]: d[v[1]] for v in tmp.values()}
 
-    @staticmethod
-    def _group_keys(connectionKeys: Set[FrozenSet]):
-        """Group keys with common members together.
-
-        The input set will be emptied."""
+    def _group_optimize(self, unvisited: Set[FrozenSet], connection: Dict[FrozenSet, Tuple[float, str]]):
+        """Groups combinations in the way that each group is internally connected with common
+        members. Then for each group, find the best non-overlapping members to reach the maximum length
+        reduction."""
 
         que = deque()
-        while connectionKeys:
-            currentGroup = [connectionKeys.pop()]
-            que.extend(currentGroup)
-            while que:
-                currentVert = que.popleft()
-                connected = tuple(filterfalse(currentVert.isdisjoint, connectionKeys))
-                connectionKeys.difference_update(connected)
-                currentGroup.extend(connected)
-                if not connectionKeys:
-                    break
-                que.extend(connected)
-            yield currentGroup
-
-    def _mip_solver(self, subResult: List[FrozenSet], connection: Dict):
-        """Find the non-overlapping group with the maximum sum of length reduction.
-
-        The input list (subResult) will be emptied."""
-
-        if len(subResult) == 1:
-            yield subResult.pop()
-            return
-
+        pool = {}
         solver = self.solver
-        pool = {k: solver.BoolVar(str(i)) for i, k in enumerate(subResult)}
-        objective = solver.Objective()
-        objective.SetMaximization()
 
-        while subResult:
-            key = subResult.pop()
-            var = pool[key]
-            objective.SetCoefficient(var, connection[key][3])
-            for k in filterfalse(key.isdisjoint, subResult):
-                solver.Add(var + pool[k] <= 1)
+        while unvisited:
+            objective = solver.Objective()
 
-        if solver.Solve() != solver.OPTIMAL:
-            raise RuntimeError("MIP Solver failed.")
+            index = 0
+            currentKey = next(iter(unvisited))
+            value = connection[currentKey][0]
+            if value > 0:
+                currentVar = solver.BoolVar(str(index))
+                objective.SetCoefficient(currentVar, value)
+                index += 1
+            else:
+                currentVar = None
+            pool[currentKey] = currentVar
+            que.append(currentKey)
 
-        for k, v in pool.items():
-            if v.solution_value() == 1:
-                yield k
+            while que:
+                currentKey = que.popleft()
+                currentVar = pool[currentKey]
+                unvisited.remove(currentKey)
 
-        solver.Clear()
+                for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
+                    try:
+                        nextVar = pool[nextKey]
+                    except KeyError:
+                        nextValue = connection[nextKey][0]
+                        if nextValue > 0:
+                            nextVar = solver.BoolVar(str(index))
+                            objective.SetCoefficient(nextVar, nextValue)
+                            index += 1
+                        else:
+                            nextVar = None
+                        pool[nextKey] = nextVar
+                        que.append(nextKey)
+
+                    if currentVar and nextVar:
+                        solver.Add(currentVar + nextVar <= 1)
+
+            if index > 0:
+                if index == 1:
+                    optimal = (k for k, v in pool.items() if v)
+                else:
+                    objective.SetMaximization()
+                    if solver.Solve() != solver.OPTIMAL:
+                        raise RuntimeError("MIP Solver failed.")
+                    optimal = (k for k, v in pool.items() if v and v.solution_value() == 1)
+
+                yield chain.from_iterable(pool), optimal
+
+            solver.Clear()
+            pool.clear()
 
 
 def test_regex(regex: str, wordlist: List[str]):
