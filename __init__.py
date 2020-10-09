@@ -286,10 +286,14 @@ class Optimizer:
                     if key not in connection:
                         string = f"{self._compute_regex(frozenset(i))}{self._compute_regex(frozenset(j))}"
                         length = len(key)
-                        value = sum(map(len, chain.from_iterable(key))) + 0.999 * length - len(string) - 1
-                        if length == tokenSetLength:
-                            value += 2
-                        connection[key] = (value, string)
+                        value = (
+                            sum(map(len, chain.from_iterable(key)))
+                            + 0.999 * length
+                            + 2 * (length == tokenSetLength)
+                            - len(string)
+                            - 1
+                        )
+                        connection[key] = (value, string) if value > 0 else None
                     connectionKeys.add(key)
 
                 lgroupMirror.clear()
@@ -349,12 +353,8 @@ class Optimizer:
                 continue
             key = frozenset(v)
             length = len(k)
-            try:
-                if tmp[key][0] >= length:
-                    continue
-            except KeyError:
-                pass
-            tmp[key] = length, k
+            if tmp.get(key, (0,))[0] < length:
+                tmp[key] = length, k
 
         return {v[1]: d[v[1]] for v in tmp.values()}
 
@@ -363,8 +363,14 @@ class Optimizer:
         members. Then for each group, find the best non-overlapping members to reach the maximum length
         reduction."""
 
-        que = self._solverQue
+        if len(unvisited) == 1:
+            key = unvisited.pop()
+            if connection[key]:
+                yield key, (key,)
+            return
+
         solver = self._solver
+        que = self._solverQue
         pool = self._solverPool
 
         while unvisited:
@@ -372,10 +378,10 @@ class Optimizer:
 
             index = 0
             currentKey = next(iter(unvisited))
-            value = connection[currentKey][0]
-            if value > 0:
+            value = connection[currentKey]
+            if value:
                 currentVar = solver.BoolVar(str(index))
-                objective.SetCoefficient(currentVar, value)
+                objective.SetCoefficient(currentVar, value[0])
                 index += 1
             else:
                 currentVar = None
@@ -391,10 +397,10 @@ class Optimizer:
                     try:
                         nextVar = pool[nextKey]
                     except KeyError:
-                        nextValue = connection[nextKey][0]
-                        if nextValue > 0:
+                        value = connection[nextKey]
+                        if value:
                             nextVar = solver.BoolVar(str(index))
-                            objective.SetCoefficient(nextVar, nextValue)
+                            objective.SetCoefficient(nextVar, value[0])
                             index += 1
                         else:
                             nextVar = None
@@ -412,9 +418,7 @@ class Optimizer:
                     if solver.Solve() != solver.OPTIMAL:
                         raise RuntimeError("MIP Solver failed.")
                     optimal = (k for k, v in pool.items() if v and v.solution_value() == 1)
-
                 yield chain.from_iterable(pool), optimal
-
                 solver.Clear()
             pool.clear()
 
