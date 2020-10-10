@@ -371,11 +371,11 @@ class Optimizer:
             return
 
         solver = self._solver
+        objective = solver.Objective()
         que = deque()
         pool = {}
 
         while unvisited:
-            objective = solver.Objective()
 
             index = 0
             currentKey = next(iter(unvisited))
