@@ -218,9 +218,6 @@ class Optimizer:
 
     def __init__(self, *extracted: Extractor) -> None:
         self._solver = pywraplp.Solver.CreateSolver("RegexOptimizer", "CBC")
-        self._solverPool = {}
-        self._solverQue = deque()
-        self._subTokenSet = set()
         self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
 
     @lru_cache(maxsize=4096)
@@ -253,7 +250,7 @@ class Optimizer:
             segment = {}
             connection = {}
             connectionKeys = set()
-            subTokenSet = self._subTokenSet
+            subTokenSet = set()
 
             for token in tokenSet:
                 left = {token[i:]: token[:i] for i in range(1, len(token))}
@@ -370,8 +367,8 @@ class Optimizer:
             return
 
         solver = self._solver
-        que = self._solverQue
-        pool = self._solverPool
+        que = deque()
+        pool = {}
 
         while unvisited:
             objective = solver.Objective()
