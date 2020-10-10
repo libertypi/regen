@@ -275,10 +275,11 @@ class Optimizer:
                     for k, v in group.items():
                         target[frozenset(segment[j][i][k] for j in v)].append(k)
 
-                left = ((frozenset(chain.from_iterable(lgroup[i] for i in v)), k, v) for k, v in lgroupMirror.items())
-                right = ((frozenset(chain.from_iterable(rgroup[i] for i in v)), v, k) for k, v in rgroupMirror.items())
+                left = ((map(lgroup.get, v), k, v) for k, v in lgroupMirror.items())
+                right = ((map(rgroup.get, v), v, k) for k, v in rgroupMirror.items())
 
                 for key, i, j in chain(left, right):
+                    key = frozenset().union(*key)
                     if key not in connection:
                         string = f"{self._compute_regex(frozenset(i))}{self._compute_regex(frozenset(j))}"
                         length = len(key)
@@ -297,10 +298,11 @@ class Optimizer:
 
                 for group, optimal in self._group_optimize(connectionKeys, connection):
 
-                    remain.update(group)
-                    result.extend(connection[k][1] for k in optimal)
-                    remain.difference_update(chain.from_iterable(optimal))
-                    tokenSet.difference_update(chain.from_iterable(optimal))
+                    remain.update(*group)
+                    for key in optimal:
+                        result.append(connection[key][1])
+                        remain.difference_update(key)
+                        tokenSet.difference_update(key)
 
                     if remain:
                         subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(remain)) > 1}
@@ -358,14 +360,14 @@ class Optimizer:
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
 
-        - Yields: (Group tokens, Optimal keys)
+        - Yields: (Group keys, Optimal keys)
         - The input set (unvisited) will be emptied.
         """
 
         if len(unvisited) == 1:
             key = unvisited.pop()
             if connection[key]:
-                yield key, (key,)
+                yield (key,), (key,)
             return
 
         solver = self._solver
@@ -412,14 +414,14 @@ class Optimizer:
             if index > 0:
 
                 if index == 1:
-                    optimal = tuple(k for k, v in pool.items() if v)
+                    optimal = (k for k, v in pool.items() if v)
                 else:
                     objective.SetMaximization()
                     if solver.Solve() != solver.OPTIMAL:
                         raise RuntimeError("MIP Solver failed.")
-                    optimal = tuple(k for k, v in pool.items() if v and v.solution_value() == 1)
+                    optimal = (k for k, v in pool.items() if v and v.solution_value() == 1)
 
-                yield chain.from_iterable(pool), optimal
+                yield pool.keys(), optimal
                 solver.Clear()
 
             pool.clear()
