@@ -299,10 +299,9 @@ class Optimizer:
                 for group, optimal in self._group_optimize(connectionKeys, connection):
 
                     subTokenSet.update(group)
-                    for key in optimal:
-                        result.append(connection[key][1])
-                        subTokenSet.difference_update(key)
-                        tokenSet.difference_update(key)
+                    result.extend(connection[k][1] for k in optimal)
+                    subTokenSet.difference_update(chain.from_iterable(optimal))
+                    tokenSet.difference_update(chain.from_iterable(optimal))
 
                     if subTokenSet:
                         subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
@@ -355,10 +354,13 @@ class Optimizer:
 
         return {v[1]: d[v[1]] for v in tmp.values()}
 
-    def _group_optimize(self, unvisited: Set[FrozenSet], connection: Dict[FrozenSet, Tuple[float, str]]):
+    def _group_optimize(self, unvisited: Set[FrozenSet], connection: Dict[FrozenSet, Tuple]):
         """Groups combinations in the way that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum length
-        reduction."""
+        reduction.
+
+        The input set (unvisited) will be emptied.
+        """
 
         if len(unvisited) == 1:
             key = unvisited.pop()
@@ -409,12 +411,12 @@ class Optimizer:
 
             if index > 0:
                 if index == 1:
-                    optimal = (k for k, v in pool.items() if v)
+                    optimal = tuple(k for k, v in pool.items() if v)
                 else:
                     objective.SetMaximization()
                     if solver.Solve() != solver.OPTIMAL:
                         raise RuntimeError("MIP Solver failed.")
-                    optimal = (k for k, v in pool.items() if v and v.solution_value() == 1)
+                    optimal = tuple(k for k, v in pool.items() if v and v.solution_value() == 1)
                 yield chain.from_iterable(pool), optimal
                 solver.Clear()
             pool.clear()
