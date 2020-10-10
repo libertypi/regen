@@ -2,7 +2,6 @@ import re
 from collections import defaultdict, deque
 from functools import lru_cache
 from itertools import chain, filterfalse
-from typing import Dict, FrozenSet, Iterable, List, Set, Tuple
 
 from ortools.linear_solver import pywraplp
 
@@ -11,7 +10,7 @@ class Tokenizer:
     _rangeChars = frozenset(r"0123456789,")
     _psplit = re.compile(r"[^\\]|\\.")
 
-    def __init__(self, string: Iterable) -> None:
+    def __init__(self, string: str) -> None:
         try:
             self.tokens = self._psplit.findall(string)
         except TypeError:
@@ -79,7 +78,7 @@ class Extractor:
     _specials = frozenset("{}()[]|?*+")
     _repetitions = frozenset("*?+{")
 
-    def __init__(self, string) -> None:
+    def __init__(self, string: str) -> None:
         self._string = string
         self._text = None
         if not string:
@@ -186,14 +185,14 @@ class Extractor:
         self.result = tuple(map(tuple, result))
 
     @staticmethod
-    def _concat(hold: List, subresult: List[List]):
+    def _concat(hold: list, subresult: list):
         if hold:
             for s in subresult:
                 s.extend(hold)
             hold.clear()
 
     @classmethod
-    def _transfer(cls, hold: List, subresult: List[List], result: List[List]):
+    def _transfer(cls, hold: list, subresult: list, result: list):
         """Concat hold with subresult, then transfer subresult to self.result."""
         cls._concat(hold, subresult)
         result.extend(subresult)
@@ -221,7 +220,7 @@ class Optimizer:
         self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
 
     @lru_cache(maxsize=4096)
-    def _compute_regex(self, tokenSet: FrozenSet[Tuple[str]]) -> str:
+    def _compute_regex(self, tokenSet: frozenset) -> str:
 
         tokenSet = set(tokenSet)
 
@@ -250,7 +249,7 @@ class Optimizer:
             segment = {}
             connection = {}
             connectionKeys = set()
-            subTokenSet = set()
+            remain = set()
 
             for token in tokenSet:
                 left = {token[i:]: token[:i] for i in range(1, len(token))}
@@ -298,16 +297,16 @@ class Optimizer:
 
                 for group, optimal in self._group_optimize(connectionKeys, connection):
 
-                    subTokenSet.update(group)
+                    remain.update(group)
                     result.extend(connection[k][1] for k in optimal)
-                    subTokenSet.difference_update(chain.from_iterable(optimal))
+                    remain.difference_update(chain.from_iterable(optimal))
                     tokenSet.difference_update(chain.from_iterable(optimal))
 
-                    if subTokenSet:
-                        subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
-                        subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(subTokenSet)) > 1}
+                    if remain:
+                        subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(remain)) > 1}
+                        subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(remain)) > 1}
                         que.append((subLgroup, subRgroup))
-                        subTokenSet.clear()
+                        remain.clear()
 
             if tokenSet:
                 chars = frozenset(i for i in tokenSet if len(i) == 1)
@@ -337,7 +336,7 @@ class Optimizer:
         return f"{tokenSet.pop()[0]}{qmark}"
 
     @staticmethod
-    def _filter_group(d: Dict[Tuple[str], Set[Tuple[str]]]):
+    def _filter_group(d: dict):
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
         Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC)
@@ -354,12 +353,13 @@ class Optimizer:
 
         return {v[1]: d[v[1]] for v in tmp.values()}
 
-    def _group_optimize(self, unvisited: Set[FrozenSet], connection: Dict[FrozenSet, Tuple]):
+    def _group_optimize(self, unvisited: set, connection: dict):
         """Groups combinations in the way that each group is internally connected with common
-        members. Then for each group, find the best non-overlapping members to reach the maximum length
-        reduction.
+        members. Then for each group, find the best non-overlapping members to reach the maximum
+        length reduction.
 
-        The input set (unvisited) will be emptied.
+        - Yields: (Group tokens, Optimal keys)
+        - The input set (unvisited) will be emptied.
         """
 
         if len(unvisited) == 1:
@@ -410,6 +410,7 @@ class Optimizer:
                         solver.Add(currentVar + nextVar <= 1)
 
             if index > 0:
+
                 if index == 1:
                     optimal = tuple(k for k, v in pool.items() if v)
                 else:
@@ -417,12 +418,14 @@ class Optimizer:
                     if solver.Solve() != solver.OPTIMAL:
                         raise RuntimeError("MIP Solver failed.")
                     optimal = tuple(k for k, v in pool.items() if v and v.solution_value() == 1)
+
                 yield chain.from_iterable(pool), optimal
                 solver.Clear()
+
             pool.clear()
 
 
-def test_regex(regex: str, wordlist: List[str]):
+def test_regex(regex: str, wordlist: list):
     extracted = Extractor(regex).get_text()
     assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original words."
 
