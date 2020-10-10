@@ -231,8 +231,6 @@ class Optimizer:
             qmark = ""
 
         tokenSetLength = len(tokenSet)
-        if not tokenSetLength:
-            return ""
 
         if any(len(i) > 1 for i in tokenSet):
 
@@ -320,7 +318,7 @@ class Optimizer:
             result.sort()
             string = "|".join(result)
 
-            if qmark or len(result) > 1:
+            if len(result) > 1 or qmark:
                 string = f"({string}){qmark}"
 
             return string
@@ -335,7 +333,10 @@ class Optimizer:
 
             return f'[{"".join(char)}]{qmark}'
 
-        return f"{tokenSet.pop()[0]}{qmark}"
+        try:
+            return f"{tokenSet.pop()[0]}{qmark}"
+        except KeyError:
+            return ""
 
     @staticmethod
     def _filter_group(d: dict):
