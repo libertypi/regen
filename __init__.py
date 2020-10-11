@@ -303,8 +303,9 @@ class Optimizer:
                         tokenSet.difference_update(key)
 
                     if remain:
-                        subLgroup = {k: i for k, v in lgroup.items() if len(i := v.intersection(remain)) > 1}
-                        subRgroup = {k: i for k, v in rgroup.items() if len(i := v.intersection(remain)) > 1}
+                        target = self._copy_group if connectionKeys else self._update_group
+                        subLgroup = target(lgroup, remain)
+                        subRgroup = target(rgroup, remain)
                         que.append((subLgroup, subRgroup))
                         remain.clear()
 
@@ -342,8 +343,7 @@ class Optimizer:
     def _filter_group(d: dict):
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
-        Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC)
-        only the first item will be keeped.
+        - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
         """
         tmp = {}
         for k, v in d.items():
@@ -355,6 +355,17 @@ class Optimizer:
                 tmp[key] = length, k
 
         return {v[1]: d[v[1]] for v in tmp.values()}
+
+    @staticmethod
+    def _update_group(group: dict, refer: set):
+        for v in group.values():
+            v.intersection_update(refer)
+        return {k: v for k, v in group.items() if len(v) > 1}
+
+    @staticmethod
+    def _copy_group(group: dict, refer: set):
+        intersect = map(refer.intersection, group.values())
+        return {k: v for k, v in zip(group.keys(), intersect) if len(v) > 1}
 
     def _group_optimize(self, unvisited: set, connection: dict):
         """Groups combinations in the way that each group is internally connected with common
