@@ -364,8 +364,7 @@ class Optimizer:
 
     @staticmethod
     def _copy_group(group: dict, refer: set):
-        intersect = map(refer.intersection, group.values())
-        return {k: v for k, v in zip(group.keys(), intersect) if len(v) > 1}
+        return {k: i for k, v in group.items() if len(i := v.intersection(refer)) > 1}
 
     def _group_optimize(self, unvisited: set, connection: dict):
         """Groups combinations in the way that each group is internally connected with common
