@@ -418,7 +418,8 @@ class Optimizer:
 
     @staticmethod
     def _copy_affix(d: dict, r: set) -> dict:
-        return {k: i for k, v in d.items() if len(i := v.intersection(r)) > 1}
+        intersect = r.intersection
+        return {k: i for k, v in d.items() if len(i := intersect(v)) > 1}
 
     @staticmethod
     def _process_group(prefix: dict, suffix: dict, segment: dict, tokenSet: set):
