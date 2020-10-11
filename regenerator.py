@@ -428,7 +428,7 @@ class Optimizer:
         frozen_union = frozenset().union
 
         for k, v in prefix.items():
-            mirror[frozenset(segment[j][0][k] for j in v)].append(k)
+            mirror[frozenset(segment[i][0][k] for i in v)].append(k)
         for k, v in mirror.items():
             if all_in_set(k):
                 v.append(())
@@ -438,7 +438,7 @@ class Optimizer:
 
         mirror.clear()
         for k, v in suffix.items():
-            mirror[frozenset(segment[j][1][k] for j in v)].append(k)
+            mirror[frozenset(segment[i][1][k] for i in v)].append(k)
         for k, v in mirror.items():
             if all_in_set(k):
                 v.append(())
