@@ -7,7 +7,8 @@ from ortools.linear_solver import pywraplp
 
 
 class Tokenizer:
-    _rangeChars = frozenset(r"0123456789,")
+    _rangeChars = frozenset("0123456789,")
+    _suffixes = frozenset("*?+")
     _psplit = re.compile(r"[^\\]|\\.")
 
     def __init__(self, string: str) -> None:
@@ -60,7 +61,7 @@ class Tokenizer:
             self.index = suffixEnd + 1  # 1 char after "}"
             char = self.peek()
         try:
-            while char in "*?+":
+            while char in self._suffixes:
                 self.confirm()
                 char = self.peek()
         except TypeError:  # Reach the end, char == None
@@ -212,6 +213,7 @@ class Extractor:
 
 class Optimizer:
 
+    _charSetSpecials = frozenset((c,) for c in "]^-")
     _charSetFront = tuple((c,) for c in "]^")
     _charSetEnd = tuple((c,) for c in "-")
 
@@ -327,10 +329,11 @@ class Optimizer:
         elif tokenSetLength > 1:
             char = sorted(chain.from_iterable(tokenSet))
 
-            for c in tokenSet.intersection(self._charSetFront):
-                char.insert(0, char.pop(char.index(c[0])))
-            for c in tokenSet.intersection(self._charSetEnd):
-                char.append(char.pop(char.index(c[0])))
+            if not tokenSet.isdisjoint(self._charSetSpecials):
+                for c in tokenSet.intersection(self._charSetFront):
+                    char.insert(0, char.pop(char.index(c[0])))
+                for c in tokenSet.intersection(self._charSetEnd):
+                    char.append(char.pop(char.index(c[0])))
 
             return f'[{"".join(char)}]{qmark}'
 
@@ -378,7 +381,7 @@ class Optimizer:
         if len(unvisited) == 1:
             key = unvisited.pop()
             if connection[key]:
-                yield (key,), (key,)
+                yield (), (key,)
             return
 
         solver = self._solver
