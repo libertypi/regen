@@ -425,7 +425,7 @@ class Optimizer:
             if index > 0:
 
                 if index == 1:
-                    optimal = (k for k, v in pool.items() if v)
+                    optimal = (next(filter(pool.get, pool)),)
                 else:
                     objective.SetMaximization()
                     if solver.Solve() != solver.OPTIMAL:
