@@ -265,8 +265,8 @@ class Optimizer:
         self._solver = pywraplp.Solver.CreateSolver("CBC")
         self._solverQue = deque()
         self._solverPool = {}
-        self._lgroup = defaultdict(set)
-        self._rgroup = defaultdict(set)
+        self._prefix = defaultdict(set)
+        self._suffix = defaultdict(set)
         self._remain = set()
 
     @lru_cache(maxsize=4096)
@@ -310,52 +310,42 @@ class Optimizer:
             string = "".join(*tokenSet)
             return f"({string}){quantifier}" if quantifier else string
 
-        lgroup = self._lgroup
-        rgroup = self._rgroup
+        prefix = self._prefix
+        suffix = self._suffix
         remain = self._remain
         groupKeys = self._solverPool.keys()
         result = []
         que = deque()
-        lgroupMirror = defaultdict(list)
-        rgroupMirror = defaultdict(list)
         segment = {}
         connection = {}
         connectionKeys = set()
-        frozenUnion = frozenset().union
 
         for token in tokenSet:
-            left = {token[i:]: token[:i] for i in range(1, len(token))}
+            left = {token[:i]: token[i:] for i in range(1, len(token))}
             right = {v: k for k, v in left.items()}
             left[token] = right[token] = ()
-            segment[token] = (left, right)
-            for k in left:
-                lgroup[k].add(token)
-            for k in right:
-                rgroup[k].add(token)
+            segment[token] = left, right
+            for i in left:
+                prefix[i].add(token)
+            for i in right:
+                suffix[i].add(token)
 
-        que.append((self._filter_group(lgroup), self._filter_group(rgroup)))
-        lgroup.clear()
-        rgroup.clear()
+        que.append((self._filter_affix(prefix), self._filter_affix(suffix)))
+        prefix.clear()
+        suffix.clear()
 
         if quantifier:
             tokenSet.add(())
             quantifier = ""
+            tokenSetLength += 1
 
         while que:
 
-            lgroup, rgroup = que.popleft()
-            if not (lgroup or rgroup):
+            prefix, suffix = que.popleft()
+            if not (prefix or suffix):
                 continue
 
-            for group, target, i in (lgroup, lgroupMirror, 0), (rgroup, rgroupMirror, 1):
-                for k, v in group.items():
-                    target[frozenset(segment[j][i][k] for j in v)].append(k)
-
-            left = ((frozenUnion(*map(lgroup.get, v)), k, v) for k, v in lgroupMirror.items())
-            right = ((frozenUnion(*map(rgroup.get, v)), v, k) for k, v in rgroupMirror.items())
-            addition = self._build_addition(tokenSet, lgroupMirror, rgroupMirror)
-
-            for key, i, j in chain(left, right, addition):
+            for key, i, j in self._process_group(prefix, suffix, segment, tokenSet):
                 connectionKeys.add(key)
                 if key not in connection:
                     string = f"{self.compute(frozenset(i))}{self.compute(frozenset(j))}"
@@ -369,10 +359,7 @@ class Optimizer:
                     )
                     connection[key] = (value, string) if value > 0 else None
 
-            lgroupMirror.clear()
-            rgroupMirror.clear()
-
-            for optimal in self._group_optimize(connectionKeys, connection):
+            for optimal in self._optimize_group(connectionKeys, connection):
 
                 remain.update(*groupKeys)
                 for key in optimal:
@@ -381,8 +368,8 @@ class Optimizer:
                     tokenSet.difference_update(key)
 
                 if remain:
-                    target = self._copy_group if connectionKeys else self._update_group
-                    que.append((target(lgroup, remain), target(rgroup, remain)))
+                    target = self._copy_affix if connectionKeys else self._update_affix
+                    que.append((target(prefix, remain), target(suffix, remain)))
                     remain.clear()
 
         if () in tokenSet:
@@ -409,7 +396,7 @@ class Optimizer:
         return sum(map(len, token)) > 1
 
     @staticmethod
-    def _filter_group(d: dict) -> dict:
+    def _filter_affix(d: dict) -> dict:
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
         - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
@@ -424,27 +411,41 @@ class Optimizer:
         return {v[1]: d[v[1]] for v in tmp.values()}
 
     @staticmethod
-    def _build_addition(tokenSet: set, lgroupMirror: dict, rgroupMirror: dict):
-        for k in filter(tokenSet.issuperset, lgroupMirror):
-            v = lgroupMirror[k].copy()
-            v.append(())
-            yield frozenset(x + y for x in k for y in v), k, v
-        for k in filter(tokenSet.issuperset, rgroupMirror):
-            v = rgroupMirror[k].copy()
-            v.append(())
-            yield frozenset(x + y for x in v for y in k), v, k
+    def _update_affix(d: dict, r: set) -> dict:
+        for v in d.values():
+            v.intersection_update(r)
+        return {k: v for k, v in d.items() if len(v) > 1}
 
     @staticmethod
-    def _update_group(group: dict, refer: set) -> dict:
-        for v in group.values():
-            v.intersection_update(refer)
-        return {k: v for k, v in group.items() if len(v) > 1}
+    def _copy_affix(d: dict, r: set) -> dict:
+        return {k: i for k, v in d.items() if len(i := v.intersection(r)) > 1}
 
     @staticmethod
-    def _copy_group(group: dict, refer: set) -> dict:
-        return {k: i for k, v in group.items() if len(i := v.intersection(refer)) > 1}
+    def _process_group(prefix: dict, suffix: dict, segment: dict, tokenSet: set):
+        mirror = defaultdict(list)
+        all_in_set = tokenSet.issuperset
+        frozen_union = frozenset().union
 
-    def _group_optimize(self, unvisited: set, connection: dict):
+        for k, v in prefix.items():
+            mirror[frozenset(segment[j][0][k] for j in v)].append(k)
+        for k, v in mirror.items():
+            if all_in_set(k):
+                v.append(())
+                yield frozenset(x + y for x in v for y in k), v, k
+            else:
+                yield frozen_union(*map(prefix.get, v)), v, k
+
+        mirror.clear()
+        for k, v in suffix.items():
+            mirror[frozenset(segment[j][1][k] for j in v)].append(k)
+        for k, v in mirror.items():
+            if all_in_set(k):
+                v.append(())
+                yield frozenset(x + y for x in k for y in v), k, v
+            else:
+                yield frozen_union(*map(suffix.get, v)), k, v
+
+    def _optimize_group(self, unvisited: set, connection: dict):
         """Groups combinations in the way that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
@@ -464,7 +465,6 @@ class Optimizer:
         objective = solver.Objective()
         que = self._solverQue
         pool = self._solverPool
-        empty = frozenset(((),))
 
         while unvisited:
 
@@ -485,7 +485,7 @@ class Optimizer:
                 currentVar = pool[currentKey]
                 unvisited.remove(currentKey)
                 if () in currentKey:
-                    currentKey = currentKey.difference(empty)
+                    currentKey = currentKey.difference(((),))
 
                 for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
                     try:

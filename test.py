@@ -28,14 +28,14 @@ class Testregen(unittest.TestCase):
             (r"AB[^CD]|AB[^]]|AB[]]*|ABE", ["ABE", "AB[]]*", "AB[^CD]", "AB[^]]"]),
         )
         for regex, answer in values:
-            result = Regen([regex]).to_text()
+            result = [*Regen([regex]).to_text()]
             self.assertEqual(result, answer, msg=result)
 
     def test_extractor_raises(self):
         values = ("A[B", "A(BC|", "AB|((CD)", "A[[B]", "A[[BB]]", "A*?+B{}", "|{3}", "A|B{a3}", "A|B{3")
         for regex in values:
             with self.assertRaises(ValueError, msg=regex):
-                Regen([regex]).to_text()
+                [*Regen([regex]).to_text()]
 
     def test_optimizer(self):
         values = (
