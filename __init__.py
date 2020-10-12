@@ -341,7 +341,7 @@ class Optimizer:
             return ""
 
     @staticmethod
-    def _filter_group(d: dict):
+    def _filter_group(d: dict) -> dict:
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
         - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
@@ -358,13 +358,13 @@ class Optimizer:
         return {v[1]: d[v[1]] for v in tmp.values()}
 
     @staticmethod
-    def _update_group(group: dict, refer: set):
+    def _update_group(group: dict, refer: set) -> dict:
         for v in group.values():
             v.intersection_update(refer)
         return {k: v for k, v in group.items() if len(v) > 1}
 
     @staticmethod
-    def _copy_group(group: dict, refer: set):
+    def _copy_group(group: dict, refer: set) -> dict:
         return {k: i for k, v in group.items() if len(i := v.intersection(refer)) > 1}
 
     def _group_optimize(self, unvisited: set, connection: dict):
@@ -393,7 +393,7 @@ class Optimizer:
             currentKey = next(iter(unvisited))
             value = connection[currentKey]
             if value:
-                currentVar = solver.BoolVar(str(index))
+                currentVar = solver.BoolVar(f"{index}")
                 objective.SetCoefficient(currentVar, value[0])
                 index += 1
             else:
@@ -412,7 +412,7 @@ class Optimizer:
                     except KeyError:
                         value = connection[nextKey]
                         if value:
-                            nextVar = solver.BoolVar(str(index))
+                            nextVar = solver.BoolVar(f"{index}")
                             objective.SetCoefficient(nextVar, value[0])
                             index += 1
                         else:
