@@ -217,7 +217,7 @@ class Optimizer:
     _charSetEnd = tuple((c,) for c in "-")
 
     def __init__(self, *extracted: Extractor) -> None:
-        self._solver = pywraplp.Solver.CreateSolver("RegexOptimizer", "CBC")
+        self._solver = pywraplp.Solver.CreateSolver("CBC")
         self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
 
     @lru_cache(maxsize=4096)
