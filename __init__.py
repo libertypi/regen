@@ -213,7 +213,6 @@ class Extractor:
 
 class Optimizer:
 
-    _charSetSpecials = frozenset((c,) for c in "]^-")
     _charSetFront = tuple((c,) for c in "]^")
     _charSetEnd = tuple((c,) for c in "-")
 
@@ -329,11 +328,10 @@ class Optimizer:
         elif tokenSetLength > 1:
             char = sorted(chain.from_iterable(tokenSet))
 
-            if not tokenSet.isdisjoint(self._charSetSpecials):
-                for c in tokenSet.intersection(self._charSetFront):
-                    char.insert(0, char.pop(char.index(c[0])))
-                for c in tokenSet.intersection(self._charSetEnd):
-                    char.append(char.pop(char.index(c[0])))
+            for c in tokenSet.intersection(self._charSetFront):
+                char.insert(0, char.pop(char.index(c[0])))
+            for c in tokenSet.intersection(self._charSetEnd):
+                char.append(char.pop(char.index(c[0])))
 
             return f'[{"".join(char)}]{qmark}'
 
