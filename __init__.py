@@ -218,114 +218,29 @@ class Optimizer:
 
     def __init__(self, *extracted: Extractor) -> None:
         self._solver = pywraplp.Solver.CreateSolver("CBC")
-        self.result = self._compute_regex(frozenset(chain.from_iterable(e.result for e in extracted)))
+        self.result = self._process(frozenset(chain.from_iterable(e.result for e in extracted)))
 
     @lru_cache(maxsize=4096)
-    def _compute_regex(self, tokenSet: frozenset) -> str:
+    def _process(self, tokenSet: frozenset) -> str:
 
         tokenSet = set(tokenSet)
-
         if () in tokenSet:
             qmark = "?"
             tokenSet.remove(())
         else:
             qmark = ""
 
-        tokenSetLength = len(tokenSet)
-
         if any(len(i) > 1 for i in tokenSet):
+            return self._wordStrategy(tokenSet, qmark)
 
-            if tokenSetLength == 1:
-                string = "".join(*tokenSet)
-                return f"({string})?" if qmark else string
+        try:
+            return self._charSetStrategy(tokenSet, qmark)
+        except KeyError:
+            return ""
 
-            result = []
-            que = deque()
-            lgroup = defaultdict(set)
-            rgroup = defaultdict(set)
-            lgroupMirror = defaultdict(list)
-            rgroupMirror = defaultdict(list)
-            segment = {}
-            connection = {}
-            connectionKeys = set()
-            remain = set()
+    def _charSetStrategy(self, tokenSet: set, qmark: str = ""):
 
-            for token in tokenSet:
-                left = {token[i:]: token[:i] for i in range(1, len(token))}
-                right = {v: k for k, v in left.items()}
-                left[token] = right[token] = ()
-                segment[token] = (left, right)
-                for k in left:
-                    lgroup[k].add(token)
-                for k in right:
-                    rgroup[k].add(token)
-
-            lgroup = self._filter_group(lgroup)
-            rgroup = self._filter_group(rgroup)
-            que.append((lgroup, rgroup))
-
-            while que:
-
-                lgroup, rgroup = que.popleft()
-                if not (lgroup or rgroup):
-                    continue
-
-                for group, target, i in (lgroup, lgroupMirror, 0), (rgroup, rgroupMirror, 1):
-                    for k, v in group.items():
-                        target[frozenset(segment[j][i][k] for j in v)].append(k)
-
-                left = ((map(lgroup.get, v), k, v) for k, v in lgroupMirror.items())
-                right = ((map(rgroup.get, v), v, k) for k, v in rgroupMirror.items())
-
-                for key, i, j in chain(left, right):
-                    key = frozenset().union(*key)
-                    if key not in connection:
-                        string = f"{self._compute_regex(frozenset(i))}{self._compute_regex(frozenset(j))}"
-                        length = len(key)
-                        value = (
-                            sum(map(len, chain.from_iterable(key)))
-                            + 0.999 * length
-                            + 2 * (length == tokenSetLength)
-                            - len(string)
-                            - 1
-                        )
-                        connection[key] = (value, string) if value > 0 else None
-                    connectionKeys.add(key)
-
-                lgroupMirror.clear()
-                rgroupMirror.clear()
-
-                for group, optimal in self._group_optimize(connectionKeys, connection):
-
-                    remain.update(*group)
-                    for key in optimal:
-                        result.append(connection[key][1])
-                        remain.difference_update(key)
-                        tokenSet.difference_update(key)
-
-                    if remain:
-                        target = self._copy_group if connectionKeys else self._update_group
-                        subLgroup = target(lgroup, remain)
-                        subRgroup = target(rgroup, remain)
-                        que.append((subLgroup, subRgroup))
-                        remain.clear()
-
-            if tokenSet:
-                chars = frozenset(i for i in tokenSet if len(i) == 1)
-                if chars:
-                    result.append(self._compute_regex(chars))
-                    tokenSet.difference_update(chars)
-                result.extend(map("".join, tokenSet))
-
-            result.sort()
-            string = "|".join(result)
-
-            if len(result) > 1 or qmark:
-                string = f"({string}){qmark}"
-
-            return string
-
-        elif tokenSetLength > 1:
+        if len(tokenSet) > 1:
             char = sorted(chain.from_iterable(tokenSet))
 
             for c in tokenSet.intersection(self._charSetFront):
@@ -335,10 +250,100 @@ class Optimizer:
 
             return f'[{"".join(char)}]{qmark}'
 
-        try:
-            return f"{tokenSet.pop()[0]}{qmark}"
-        except KeyError:
-            return ""
+        return f"{tokenSet.pop()[0]}{qmark}"
+
+    def _wordStrategy(self, tokenSet: set, qmark: str):
+
+        tokenSetLength = len(tokenSet)
+
+        if tokenSetLength == 1:
+            string = "".join(*tokenSet)
+            return f"({string})?" if qmark else string
+
+        result = []
+        que = deque()
+        lgroup = defaultdict(set)
+        rgroup = defaultdict(set)
+        lgroupMirror = defaultdict(list)
+        rgroupMirror = defaultdict(list)
+        segment = {}
+        connection = {}
+        connectionKeys = set()
+        remain = set()
+
+        for token in tokenSet:
+            left = {token[i:]: token[:i] for i in range(1, len(token))}
+            right = {v: k for k, v in left.items()}
+            left[token] = right[token] = ()
+            segment[token] = (left, right)
+            for k in left:
+                lgroup[k].add(token)
+            for k in right:
+                rgroup[k].add(token)
+
+        lgroup = self._filter_group(lgroup)
+        rgroup = self._filter_group(rgroup)
+        que.append((lgroup, rgroup))
+
+        while que:
+
+            lgroup, rgroup = que.popleft()
+            if not (lgroup or rgroup):
+                continue
+
+            for group, target, i in (lgroup, lgroupMirror, 0), (rgroup, rgroupMirror, 1):
+                for k, v in group.items():
+                    target[frozenset(segment[j][i][k] for j in v)].append(k)
+
+            left = ((map(lgroup.get, v), k, v) for k, v in lgroupMirror.items())
+            right = ((map(rgroup.get, v), v, k) for k, v in rgroupMirror.items())
+
+            for key, i, j in chain(left, right):
+                key = frozenset().union(*key)
+                if key not in connection:
+                    string = f"{self._process(frozenset(i))}{self._process(frozenset(j))}"
+                    length = len(key)
+                    value = (
+                        sum(map(len, chain.from_iterable(key)))
+                        + 0.999 * length
+                        + 2 * (length == tokenSetLength)
+                        - len(string)
+                        - 1
+                    )
+                    connection[key] = (value, string) if value > 0 else None
+                connectionKeys.add(key)
+
+            lgroupMirror.clear()
+            rgroupMirror.clear()
+
+            for group, optimal in self._group_optimize(connectionKeys, connection):
+
+                remain.update(*group)
+                for key in optimal:
+                    result.append(connection[key][1])
+                    remain.difference_update(key)
+                    tokenSet.difference_update(key)
+
+                if remain:
+                    target = self._copy_group if connectionKeys else self._update_group
+                    subLgroup = target(lgroup, remain)
+                    subRgroup = target(rgroup, remain)
+                    que.append((subLgroup, subRgroup))
+                    remain.clear()
+
+        if tokenSet:
+            chars = {i for i in tokenSet if len(i) == 1}
+            if chars:
+                tokenSet.difference_update(chars)
+                result.append(self._charSetStrategy(chars))
+            result.extend(map("".join, tokenSet))
+
+        result.sort()
+        string = "|".join(result)
+
+        if len(result) > 1 or qmark:
+            return f"({string}){qmark}"
+        return string
 
     @staticmethod
     def _filter_group(d: dict) -> dict:
