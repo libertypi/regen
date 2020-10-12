@@ -214,7 +214,7 @@ class Extractor:
 class Optimizer:
 
     _charSetFront = tuple((c,) for c in "]^")
-    _charSetEnd = tuple((c,) for c in "-")
+    _charSetEnd = frozenset((c,) for c in "-")
 
     def __init__(self, *extracted: Extractor) -> None:
         self._solver = pywraplp.Solver.CreateSolver("CBC")
@@ -238,7 +238,7 @@ class Optimizer:
         except KeyError:
             return ""
 
-    def _charSetStrategy(self, tokenSet: set, qmark: str = ""):
+    def _charSetStrategy(self, tokenSet: set, qmark: str = "") -> str:
 
         if len(tokenSet) > 1:
             char = sorted(chain.from_iterable(tokenSet))
@@ -252,7 +252,7 @@ class Optimizer:
 
         return f"{tokenSet.pop()[0]}{qmark}"
 
-    def _wordStrategy(self, tokenSet: set, qmark: str):
+    def _wordStrategy(self, tokenSet: set, qmark: str) -> str:
 
         tokenSetLength = len(tokenSet)
 
