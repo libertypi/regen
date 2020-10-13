@@ -449,8 +449,7 @@ class Regen:
             raise TypeError("Input should be a list of strings.")
 
         self.wordlist = wordlist
-        parser = Parser()
-        self._tokens = frozenset.union(*map(parser.parse, wordlist))
+        self._tokens = frozenset.union(*map(Parser.parse, wordlist))
         self._textList = self._regex = None
 
     def to_text(self):
