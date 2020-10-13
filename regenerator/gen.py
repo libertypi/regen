@@ -11,53 +11,39 @@ _specials = frozenset("{}()[]|?*+")
 class Tokenizer:
 
     _rangeChars = frozenset("0123456789,")
-    _repetitions = frozenset("*?+{")
-    _suffixes = frozenset("*?+")
+    _suffixes = frozenset("*?+{")
+    _repetitions = frozenset("*?+")
     _psplit = re.compile(r"[^\\]|\\.").findall
 
     def __init__(self, string: str) -> None:
 
-        self._string = string
-
         try:
             self.tokens = self._psplit(string)
         except TypeError:
-            if not isinstance(string, (list, tuple)):
+            if not isinstance(string, list):
                 raise TypeError(f"Wrong type feed to tokenizer: {string}")
             self.tokens = string
 
         self.index = 0
+        self._string = string
 
     def eat(self):
         try:
             char = self.tokens[self.index]
-        except IndexError:
-            char = None
-        else:
             self.index += 1
-        return char
+            return char
+        except IndexError:
+            return None
 
     def peek(self):
-        index = self.index
         try:
-            char = self.tokens[index]
+            return self.tokens[self.index]
         except IndexError:
-            char = None
-        self.peekindex = index + 1
-        self.peekchar = char
-        return char
-
-    def confirm(self):
-        """Confirm (eat) the last peek."""
-        try:
-            self.index = self.peekindex
-            return self.peekchar
-        except AttributeError as e:
-            raise RuntimeError(f"Confirm before peek: {self.string}")
+            return None
 
     def eat_suffix(self):
         char = self.peek()
-        if char not in self._repetitions:
+        if char not in self._suffixes:
             return
 
         suffixStart = self.index  # first char of suffix
@@ -70,12 +56,9 @@ class Tokenizer:
             self.index = suffixEnd + 1  # 1 char after "}"
             char = self.peek()
 
-        try:
-            while char in self._suffixes:
-                self.confirm()
-                char = self.peek()
-        except TypeError:  # Reach the end, char == None
-            pass
+        while char in self._repetitions:
+            self.index += 1
+            char = self.peek()
 
         suffixEnd = self.index  # first char after suffix
         if suffixStart < suffixEnd:
@@ -99,7 +82,7 @@ class Parser:
 
         token = Tokenizer(string)
         if _specials.isdisjoint(token.tokens):  # Not regex we can handle
-            return frozenset((tuple(token.tokens),))
+            return frozenset({tuple(token.tokens)})
 
         result = []
         subresult = [[]]
@@ -188,7 +171,7 @@ class Parser:
                 else:
                     hold.append(f"{char}{suffix}")
 
-            char = token.confirm()
+            char = token.eat()
 
         cls._transfer(hold, subresult, result)
         return frozenset(map(tuple, result))
@@ -472,5 +455,5 @@ class Regen:
         assert text == secondText, "Extraction from computed regex is different from that of original wordlist."
 
         pattern = re.compile(regex)
-        for i in filterfalse(pattern.fullmatch, set(chain(self.wordlist, text))):
-            assert not _specials.isdisjoint(i), f"Computed regex does not full match this word: '{i}'"
+        for i in filterfalse(pattern.fullmatch, frozenset(chain(self.wordlist, text))):
+            assert not _specials.isdisjoint(i), f"Computed regex does not fully match this word: '{i}'"

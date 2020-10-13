@@ -14,7 +14,7 @@ class Testregen(unittest.TestCase):
         self.assertEqual(t.peek(), "B")
         self.assertEqual(t.eat(), "B")
         self.assertEqual(t.peek(), "C")
-        self.assertEqual(t.confirm(), "C")
+        self.assertEqual(t.eat(), "C")
         self.assertEqual(t.eat(), "D")
         self.assertEqual(t.eat_suffix(), "*")
         self.assertEqual(t.eat(), "E")
@@ -23,8 +23,6 @@ class Testregen(unittest.TestCase):
         self.assertEqual(t.eat(), "F")
         self.assertEqual(t.eat_suffix(), "{1,5}")
         self.assertEqual(t.eat(), "G")
-
-        self.assertRaises(RuntimeError, Tokenizer(string).confirm)
 
     def test_extractor(self):
         values = (
