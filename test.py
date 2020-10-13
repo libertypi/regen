@@ -6,10 +6,15 @@ import unittest
 from regenerator.gen import Tokenizer, Regen, Parser
 
 
+class DuckParser:
+    def __init__(self, string) -> None:
+        self._string = self.string = string
+
+
 class Testregen(unittest.TestCase):
     def test_tokenizer(self):
         string = "ABCD*E?*+F{1,5}G"
-        t = Tokenizer(Parser(string))
+        t = Tokenizer(DuckParser(string))
         self.assertEqual(t.eat(), "A")
         self.assertEqual(t.peek(), "B")
         self.assertEqual(t.eat(), "B")
@@ -24,7 +29,7 @@ class Testregen(unittest.TestCase):
         self.assertEqual(t.eat_suffix(), "{1,5}")
         self.assertEqual(t.eat(), "G")
 
-        self.assertRaises(RuntimeError, Tokenizer(Parser(string)).confirm)
+        self.assertRaises(RuntimeError, Tokenizer(DuckParser(string)).confirm)
 
     def test_extractor(self):
         values = (
@@ -79,9 +84,8 @@ class Testregen(unittest.TestCase):
                     wordlist = f.read().splitlines()
             except FileNotFoundError:
                 print(file, "Not Found!")
-                continue
-
-            Regen(wordlist).verify_result()
+            else:
+                Regen(wordlist).verify_result()
 
 
 if __name__ == "__main__":

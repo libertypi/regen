@@ -2,7 +2,6 @@ import re
 from collections import defaultdict, deque
 from functools import lru_cache
 from itertools import chain, filterfalse
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 from ortools.linear_solver import pywraplp
 
@@ -11,12 +10,9 @@ _repetitions = frozenset("*?+{")
 
 
 class Parser:
-    def __init__(self, string: Union[str, Tuple[str], List[str]]) -> None:
+    def __init__(self, string: str) -> None:
         self._string = string
-        if string:
-            self.resultToken = self._parse()
-        else:
-            self.resultToken = frozenset()
+        self.resultToken = self._parse() if string else frozenset()
 
     def _parse(self):
 
@@ -156,7 +152,7 @@ class Tokenizer:
 
         self.index = 0
 
-    def eat(self) -> Optional[str]:
+    def eat(self):
         try:
             char = self.tokens[self.index]
         except IndexError:
@@ -165,7 +161,7 @@ class Tokenizer:
             self.index += 1
         return char
 
-    def peek(self) -> Optional[str]:
+    def peek(self):
         index = self.index
         try:
             char = self.tokens[index]
@@ -175,7 +171,7 @@ class Tokenizer:
         self.peekchar = char
         return char
 
-    def confirm(self) -> Optional[str]:
+    def confirm(self):
         """Confirm (eat) the last peek."""
         try:
             self.index = self.peekindex
@@ -183,7 +179,7 @@ class Tokenizer:
         except AttributeError as e:
             raise RuntimeError(f"Confirm before peek: {self.ownner.string}")
 
-    def eat_suffix(self) -> Optional[str]:
+    def eat_suffix(self):
         char = self.peek()
         if char not in _repetitions:
             return
@@ -215,15 +211,15 @@ class Tokenizer:
 
 class Optimizer:
 
-    _charSetFront = tuple((c,) for c in "]^")
-    _charSetEnd = frozenset((c,) for c in "-")
+    _charsetFront = tuple((c,) for c in "]^")
+    _charsetEnd = frozenset((c,) for c in "-")
 
-    def __init__(self, tokenSet: FrozenSet[tuple]) -> None:
+    def __init__(self, tokenSet: frozenset) -> None:
         self._solver = pywraplp.Solver.CreateSolver("CBC")
         self.resultRegex = self._process(tokenSet)
 
     @lru_cache(maxsize=4096)
-    def _process(self, tokenSet: FrozenSet[tuple]) -> str:
+    def _process(self, tokenSet: frozenset) -> str:
 
         tokenSet = set(tokenSet)
         if () in tokenSet:
@@ -236,25 +232,25 @@ class Optimizer:
             return self._wordStrategy(tokenSet, qmark)
 
         try:
-            return self._charSetStrategy(tokenSet, qmark)
+            return self._charsetStrategy(tokenSet, qmark)
         except KeyError:
             return ""
 
-    def _charSetStrategy(self, tokenSet: Set[tuple], qmark: str = "") -> str:
+    def _charsetStrategy(self, tokenSet: set, qmark: str = "") -> str:
 
         if len(tokenSet) > 1:
             char = sorted(chain.from_iterable(tokenSet))
 
-            for c in tokenSet.intersection(self._charSetFront):
+            for c in tokenSet.intersection(self._charsetFront):
                 char.insert(0, char.pop(char.index(c[0])))
-            for c in tokenSet.intersection(self._charSetEnd):
+            for c in tokenSet.intersection(self._charsetEnd):
                 char.append(char.pop(char.index(c[0])))
 
             return f'[{"".join(char)}]{qmark}'
 
         return f"{tokenSet.pop()[0]}{qmark}"
 
-    def _wordStrategy(self, tokenSet: Set[tuple], qmark: str) -> str:
+    def _wordStrategy(self, tokenSet: set, qmark: str) -> str:
 
         tokenSetLength = len(tokenSet)
 
@@ -337,7 +333,7 @@ class Optimizer:
             chars = {i for i in tokenSet if len(i) == 1}
             if chars:
                 tokenSet.difference_update(chars)
-                result.append(self._charSetStrategy(chars))
+                result.append(self._charsetStrategy(chars))
             result.extend(map("".join, tokenSet))
 
         result.sort()
@@ -348,7 +344,7 @@ class Optimizer:
         return string
 
     @staticmethod
-    def _filter_group(d: Dict[tuple, Set[tuple]]) -> Dict[tuple, Set[tuple]]:
+    def _filter_group(d: dict) -> dict:
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
         - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
@@ -365,16 +361,16 @@ class Optimizer:
         return {v[1]: d[v[1]] for v in tmp.values()}
 
     @staticmethod
-    def _update_group(group: Dict[tuple, Set[tuple]], refer: Set[tuple]) -> Dict[tuple, Set[tuple]]:
+    def _update_group(group: dict, refer: set) -> dict:
         for v in group.values():
             v.intersection_update(refer)
         return {k: v for k, v in group.items() if len(v) > 1}
 
     @staticmethod
-    def _copy_group(group: Dict[tuple, Set[tuple]], refer: Set[tuple]) -> Dict[tuple, Set[tuple]]:
+    def _copy_group(group: dict, refer: set) -> dict:
         return {k: i for k, v in group.items() if len(i := v.intersection(refer)) > 1}
 
-    def _group_optimize(self, unvisited: Set[frozenset], connection: Dict[frozenset, Tuple[int, str]]):
+    def _group_optimize(self, unvisited: set, connection: dict):
         """Groups combinations in the way that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
@@ -447,7 +443,7 @@ class Optimizer:
 
 
 class Regen:
-    def __init__(self, wordlist: Union[List[str], Tuple[str], Set[str]]) -> None:
+    def __init__(self, wordlist: list) -> None:
 
         if not isinstance(wordlist, (list, tuple, set)):
             raise TypeError("Input should be a list of strings.")
@@ -457,7 +453,7 @@ class Regen:
         self._textList = self._regex = None
 
     @staticmethod
-    def _get_parsed_token(string: str) -> FrozenSet[tuple]:
+    def _get_parsed_token(string: str) -> frozenset:
         return Parser(string).resultToken
 
     def to_text(self):
