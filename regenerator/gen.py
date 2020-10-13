@@ -473,5 +473,5 @@ class Regen:
         assert text == secondText, "Extraction from computed regex is different from that of original wordlist."
 
         pattern = re.compile(regex)
-        for i in filterfalse(pattern.fullmatch, chain(self.wordlist, text)):
+        for i in filterfalse(pattern.fullmatch, set(chain(self.wordlist, text))):
             assert not _specials.isdisjoint(i), f"Computed regex does not full match this word: '{i}'"
