@@ -112,7 +112,7 @@ class Parser:
                             lo = charset.pop()
                             hi = token.eat()
                             char = f"[{lo}{char}{hi}]"
-                        except IndexError:  # "-" is the first char in chaset
+                        except IndexError:  # "-" is the first char in charset
                             pass
                     charset.append(char)
 
