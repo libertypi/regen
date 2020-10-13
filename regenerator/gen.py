@@ -2,97 +2,28 @@ import re
 from collections import defaultdict, deque
 from functools import lru_cache
 from itertools import chain, filterfalse
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple, Union
 
 from ortools.linear_solver import pywraplp
 
-
-class Tokenizer:
-    _rangeChars = frozenset("0123456789,")
-    _suffixes = frozenset("*?+")
-    _psplit = re.compile(r"[^\\]|\\.")
-
-    def __init__(self, string: str) -> None:
-        try:
-            self.tokens = self._psplit.findall(string)
-        except TypeError:
-            if not isinstance(string, (list, tuple)):
-                raise TypeError(f"Wrong type feed to tokenizer: {string}")
-            self.tokens = string
-
-        self.string = string
-        self.index = 0
-
-    def eat(self):
-        try:
-            char = self.tokens[self.index]
-        except IndexError:
-            char = None
-        else:
-            self.index += 1
-        return char
-
-    def peek(self):
-        index = self.index
-        try:
-            char = self.tokens[index]
-        except IndexError:
-            char = None
-        self.peekindex = index + 1
-        self.peekchar = char
-        return char
-
-    def confirm(self):
-        """Confirm (eat) the last peek."""
-        try:
-            self.index = self.peekindex
-            return self.peekchar
-        except AttributeError as e:
-            raise RuntimeError(f"Confirm before peek: {self.string}")
-
-    def eat_suffix(self):
-        suffixStart = self.index  # first char of suffix
-        char = self.peek()
-        if char == "{":
-            try:
-                suffixEnd = self.tokens.index("}", suffixStart + 2)  # +2 so "{}" will not be matched
-                assert self._rangeChars.issuperset(self.tokens[suffixStart + 1 : suffixEnd])
-            except (ValueError, AssertionError):
-                raise ValueError(f"Bad range format: {self.string}")
-            self.index = suffixEnd + 1  # 1 char after "}"
-            char = self.peek()
-        try:
-            while char in self._suffixes:
-                self.confirm()
-                char = self.peek()
-        except TypeError:  # Reach the end, char == None
-            pass
-        suffixEnd = self.index  # first char after suffix
-        if suffixStart < suffixEnd:
-            return self.get_substr(suffixStart, suffixEnd)
-
-    def get_substr(self, start=0, stop=None):
-        return "".join(self.tokens[start:stop])
+_notSpecial = frozenset("{}()[]|?*+").isdisjoint
+_repetitions = frozenset("*?+{")
 
 
-class Extractor:
-
-    _specials = frozenset("{}()[]|?*+")
-    _repetitions = frozenset("*?+{")
-
-    def __init__(self, string: str) -> None:
+class Parser:
+    def __init__(self, string: Union[str, Tuple[str], List[str]]) -> None:
         self._string = string
-        self._text = None
-        if not string:
-            self.result = ()
-            return
+        if string:
+            self.resultToken = self._parse()
+        else:
+            self.resultToken = frozenset()
 
-        token = Tokenizer(string)
-        if self._specials.isdisjoint(token.tokens):  # Not regex we can handle
-            self.result = (tuple(token.tokens),)
-            self._text = (self._get_string(),)
-            return
+    def _parse(self):
 
-        repetitions = self._repetitions
+        token = Tokenizer(self)
+        if _notSpecial(token.tokens):  # Not regex we can handle
+            return frozenset((tuple(token.tokens),))
+
         result = []
         subresult = [[]]
         hold = []
@@ -111,9 +42,9 @@ class Extractor:
                 while True:
                     char = token.eat()
                     if not char:
-                        raise ValueError(f"Bad character set: {self._get_string()}")
+                        raise ValueError(f"Bad character set: {self.string}")
                     if char == "[":
-                        raise ValueError(f"Nested character set: {self._get_string()}")
+                        raise ValueError(f"Nested character set: {self.string}")
                     if char == "]" and charset:
                         break
                     if char == "-" and token.peek() != "]":
@@ -151,24 +82,24 @@ class Extractor:
                             break
                     char = token.eat()
                 else:
-                    raise ValueError(f"Unbalanced parenthesis: {self._get_string()}")
+                    raise ValueError(f"Unbalanced parenthesis: {self.string}")
 
                 end = token.index - 1  # index of ")"
-                substr = Extractor(token.tokens[start:end])
+                subToken = Parser(token.tokens[start:end]).resultToken
 
                 suffix = token.eat_suffix()
                 if not suffix:
-                    subresult = [[*x, *hold, *y] for x in subresult for y in substr.result]
+                    subresult = [[*x, *hold, *y] for x in subresult for y in subToken]
                     hold.clear()
                 elif suffix == "?":
                     self._concat(hold, subresult)
-                    subresult.extend(tuple([*x, *y] for x in subresult for y in substr.result))
+                    subresult.extend(tuple([*x, *y] for x in subresult for y in subToken))
                 else:
-                    char = f"{Optimizer(substr).result}{suffix}"
+                    char = f"{Optimizer(subToken).resultRegex}{suffix}"
                     hold.append(char)
 
-            elif char in repetitions:
-                raise ValueError(f"Invalid character '{char}': {self._get_string()}")
+            elif char in _repetitions:
+                raise ValueError(f"Invalid character '{char}': {self.string}")
 
             else:
                 suffix = token.eat_suffix()
@@ -183,7 +114,7 @@ class Extractor:
             char = token.confirm()
 
         self._transfer(hold, subresult, result)
-        self.result = tuple(map(tuple, result))
+        return frozenset(map(tuple, result))
 
     @staticmethod
     def _concat(hold: list, subresult: list):
@@ -200,15 +131,86 @@ class Extractor:
         subresult.clear()
         subresult.append([])
 
-    def _get_string(self):
-        if not isinstance(self._string, str):
-            self._string = "".join(self._string)
-        return self._string
+    @property
+    def string(self):
+        return self._string if isinstance(self._string, str) else "".join(self._string)
 
-    def get_text(self):
-        if self._text is None:
-            self._text = tuple(map("".join, self.result))
-        return self._text
+
+class Tokenizer:
+
+    _rangeChars = frozenset("0123456789,")
+    _suffixes = frozenset("*?+")
+    _psplit = re.compile(r"[^\\]|\\.").findall
+
+    def __init__(self, ownner: Parser) -> None:
+
+        self.ownner = ownner
+        string = ownner._string
+
+        try:
+            self.tokens = self._psplit(string)
+        except TypeError:
+            if not isinstance(string, (list, tuple)):
+                raise TypeError(f"Wrong type feed to tokenizer: {string}")
+            self.tokens = string
+
+        self.index = 0
+
+    def eat(self) -> Optional[str]:
+        try:
+            char = self.tokens[self.index]
+        except IndexError:
+            char = None
+        else:
+            self.index += 1
+        return char
+
+    def peek(self) -> Optional[str]:
+        index = self.index
+        try:
+            char = self.tokens[index]
+        except IndexError:
+            char = None
+        self.peekindex = index + 1
+        self.peekchar = char
+        return char
+
+    def confirm(self) -> Optional[str]:
+        """Confirm (eat) the last peek."""
+        try:
+            self.index = self.peekindex
+            return self.peekchar
+        except AttributeError as e:
+            raise RuntimeError(f"Confirm before peek: {self.ownner.string}")
+
+    def eat_suffix(self) -> Optional[str]:
+        char = self.peek()
+        if char not in _repetitions:
+            return
+
+        suffixStart = self.index  # first char of suffix
+        if char == "{":
+            try:
+                suffixEnd = self.tokens.index("}", suffixStart + 2)  # +2 so "{}" will not be matched
+                assert self._rangeChars.issuperset(self.tokens[suffixStart + 1 : suffixEnd])
+            except (ValueError, AssertionError):
+                raise ValueError(f"Bad range format: {self.ownner.string}")
+            self.index = suffixEnd + 1  # 1 char after "}"
+            char = self.peek()
+
+        try:
+            while char in self._suffixes:
+                self.confirm()
+                char = self.peek()
+        except TypeError:  # Reach the end, char == None
+            pass
+
+        suffixEnd = self.index  # first char after suffix
+        if suffixStart < suffixEnd:
+            return self.get_substr(suffixStart, suffixEnd)
+
+    def get_substr(self, start=0, stop=None) -> str:
+        return "".join(self.tokens[start:stop])
 
 
 class Optimizer:
@@ -216,12 +218,12 @@ class Optimizer:
     _charSetFront = tuple((c,) for c in "]^")
     _charSetEnd = frozenset((c,) for c in "-")
 
-    def __init__(self, *extracted: Extractor) -> None:
+    def __init__(self, tokenSet: FrozenSet[tuple]) -> None:
         self._solver = pywraplp.Solver.CreateSolver("CBC")
-        self.result = self._process(frozenset(chain.from_iterable(e.result for e in extracted)))
+        self.resultRegex = self._process(tokenSet)
 
     @lru_cache(maxsize=4096)
-    def _process(self, tokenSet: frozenset) -> str:
+    def _process(self, tokenSet: FrozenSet[tuple]) -> str:
 
         tokenSet = set(tokenSet)
         if () in tokenSet:
@@ -238,7 +240,7 @@ class Optimizer:
         except KeyError:
             return ""
 
-    def _charSetStrategy(self, tokenSet: set, qmark: str = "") -> str:
+    def _charSetStrategy(self, tokenSet: Set[tuple], qmark: str = "") -> str:
 
         if len(tokenSet) > 1:
             char = sorted(chain.from_iterable(tokenSet))
@@ -252,7 +254,7 @@ class Optimizer:
 
         return f"{tokenSet.pop()[0]}{qmark}"
 
-    def _wordStrategy(self, tokenSet: set, qmark: str) -> str:
+    def _wordStrategy(self, tokenSet: Set[tuple], qmark: str) -> str:
 
         tokenSetLength = len(tokenSet)
 
@@ -346,7 +348,7 @@ class Optimizer:
         return string
 
     @staticmethod
-    def _filter_group(d: dict) -> dict:
+    def _filter_group(d: Dict[tuple, Set[tuple]]) -> Dict[tuple, Set[tuple]]:
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
         - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
@@ -363,16 +365,16 @@ class Optimizer:
         return {v[1]: d[v[1]] for v in tmp.values()}
 
     @staticmethod
-    def _update_group(group: dict, refer: set) -> dict:
+    def _update_group(group: Dict[tuple, Set[tuple]], refer: Set[tuple]) -> Dict[tuple, Set[tuple]]:
         for v in group.values():
             v.intersection_update(refer)
         return {k: v for k, v in group.items() if len(v) > 1}
 
     @staticmethod
-    def _copy_group(group: dict, refer: set) -> dict:
+    def _copy_group(group: Dict[tuple, Set[tuple]], refer: Set[tuple]) -> Dict[tuple, Set[tuple]]:
         return {k: i for k, v in group.items() if len(i := v.intersection(refer)) > 1}
 
-    def _group_optimize(self, unvisited: set, connection: dict):
+    def _group_optimize(self, unvisited: Set[frozenset], connection: Dict[frozenset, Tuple[int, str]]):
         """Groups combinations in the way that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
@@ -444,10 +446,39 @@ class Optimizer:
             pool.clear()
 
 
-def test_regex(regex: str, wordlist: list):
-    extracted = Extractor(regex).get_text()
-    assert sorted(wordlist) == sorted(extracted), "Extracted regex is different from original words."
+class Regen:
+    def __init__(self, wordlist: Union[List[str], Tuple[str], Set[str]]) -> None:
 
-    pattern = re.compile(regex)
-    for i in filterfalse(pattern.fullmatch, wordlist):
-        assert re.search(r"[*+{}]", i), f"Regex matching test failed: '{i}'"
+        if not isinstance(wordlist, (list, tuple, set)):
+            raise TypeError("Input should be a list of strings.")
+
+        self.wordlist = wordlist
+        self._tokens = frozenset.union(*map(self._get_parsed_token, wordlist))
+        self._textList = self._regex = None
+
+    @staticmethod
+    def _get_parsed_token(string: str) -> FrozenSet[tuple]:
+        return Parser(string).resultToken
+
+    def to_text(self):
+        """Extract a regular expression to a list of corresponding plain text."""
+        if self._textList is None:
+            self._textList = sorted(map("".join, self._tokens))
+        return self._textList
+
+    def to_regex(self):
+        """Output a single regular expression matching all the strings."""
+        if self._regex is None:
+            self._regex = Optimizer(self._tokens).resultRegex
+        return self._regex
+
+    def verify_result(self):
+        text = self.to_text()
+        regex = self.to_regex()
+
+        secondText = Regen([regex]).to_text()
+        assert text == secondText, "Extraction from computed regex is different from that of original wordlist."
+
+        pattern = re.compile(regex)
+        for i in filterfalse(pattern.fullmatch, chain(self.wordlist, text)):
+            assert not _notSpecial(i), f"Computed regex does not full match this word: '{i}'"
