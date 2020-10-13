@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-
 from sys import argv
 from regenerator import Regen
 

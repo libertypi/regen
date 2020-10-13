@@ -3,18 +3,13 @@
 import os.path
 import unittest
 
-from regenerator.gen import Tokenizer, Regen, Parser
-
-
-class DuckParser:
-    def __init__(self, string) -> None:
-        self._string = self.string = string
+from regenerator.gen import Tokenizer, Regen
 
 
 class Testregen(unittest.TestCase):
     def test_tokenizer(self):
         string = "ABCD*E?*+F{1,5}G"
-        t = Tokenizer(DuckParser(string))
+        t = Tokenizer(string)
         self.assertEqual(t.eat(), "A")
         self.assertEqual(t.peek(), "B")
         self.assertEqual(t.eat(), "B")
@@ -29,7 +24,7 @@ class Testregen(unittest.TestCase):
         self.assertEqual(t.eat_suffix(), "{1,5}")
         self.assertEqual(t.eat(), "G")
 
-        self.assertRaises(RuntimeError, Tokenizer(DuckParser(string)).confirm)
+        self.assertRaises(RuntimeError, Tokenizer(string).confirm)
 
     def test_extractor(self):
         values = (
