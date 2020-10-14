@@ -3,27 +3,10 @@
 import os.path
 import unittest
 
-from regenerator.gen import Tokenizer, Regen
+from regenerator import Regen
 
 
 class Testregen(unittest.TestCase):
-    def test_tokenizer(self):
-        string = "ABCD*E?*+F{1,5}G"
-        t = Tokenizer(string)
-        self.assertEqual(t.eat(), "A")
-        self.assertEqual(t.peek(), "B")
-        self.assertEqual(t.eat(), "B")
-        self.assertEqual(t.peek(), "C")
-        self.assertEqual(t.eat(), "C")
-        self.assertEqual(t.eat(), "D")
-        self.assertEqual(t.eat_suffix(), "*")
-        self.assertEqual(t.eat(), "E")
-        self.assertEqual(t.eat_suffix(), "?*+")
-        self.assertEqual(t.eat_suffix(), None)
-        self.assertEqual(t.eat(), "F")
-        self.assertEqual(t.eat_suffix(), "{1,5}")
-        self.assertEqual(t.eat(), "G")
-
     def test_extractor(self):
         values = (
             (r"A[BC]D", ["ABD", "ACD"]),
@@ -38,6 +21,11 @@ class Testregen(unittest.TestCase):
             (r"AB|CD", ["AB", "CD"]),
             (r"(A(B|C(D|E)*)*|F)", ["A(B|C[DE]*)*", "F"]),
             (r"A(\B*\C|\D)?", ["A", "A\\B*\\C", "A\\D"]),
+            (r"(ABC)*", ["(ABC)*"]),
+            (r"((ABC)?)*", ["((ABC)?)*"]),
+            (r"(A|B|C|D){3}", ["[ABCD]{3}"]),
+            (r"(ABC|ABD|AB)+", ["(AB[CD]?)+"]),
+            (r"AB[^CD]|AB[^]]|AB[]]*|ABE", ["ABE", "AB[]]*", "AB[^CD]", "AB[^]]"]),
         )
         for regex, answer in values:
             result = Regen([regex]).to_text()
@@ -63,6 +51,7 @@ class Testregen(unittest.TestCase):
                 ),
                 "(atk|cruel|tonights)girlfriends?",
             ),
+            (("A|B*",), "(A|B*)"),
         )
         for wordlist, answer in values:
             self.assertEqual(Regen(wordlist).to_regex(), answer)
