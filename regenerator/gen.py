@@ -1,3 +1,28 @@
+"""
+Main module for computing regular expressions from a list of strings/regex.
+
+The libary expand a list of regex to a finite set of words, then generate a new
+regular expression using linear optimization to find the near-shortest combination.
+The computed regex should match exactly the same words as input.
+
+The Regen class is intended for external uses, example:
+
+from regenerator import Regen
+
+wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
+regen = Regen(wordlist)
+regen.to_regex() -> '[AB]B[CD]'
+
+wordlist = ['[AB]B[CD]', 'XYZ']
+regen = Regen(wordlist)
+regen.to_text() -> ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
+regen.to_regex() -> '(XYZ|[AB]B[CD])'
+regen.to_regex(omitOuterParen=True) -> 'XYZ|[AB]B[CD]'
+
+Other classes in the libary are for internal uses only.
+"""
+
+
 import re
 from collections import defaultdict, deque
 from functools import lru_cache
@@ -14,7 +39,7 @@ class Parser:
     _suffixes = frozenset("*?+{")
     _repetitions = frozenset("*?+")
     _psplit = re.compile(r"[^\\]|\\.").findall
-    _parenFinder = re.compile(r"(?<!\\)[()]").findall
+    _parenFinder = re.compile(r"(?<!\\)[()]").finditer
 
     def __init__(self) -> None:
         self.result = [[]]
@@ -80,49 +105,56 @@ class Parser:
         self.token = self._string = None
 
     def _charsetStrategy(self):
-
         start = self.index - 1  # including "["
         hold = self.hold
         charset = self.charset
 
-        while True:
-
-            char = self._eat()
-
-            if not char:
+        char = self._eat()
+        if char == "^":
+            try:
+                # from 2 chars after "^" to the 1st after "]": [^]C]D (C-D)
+                end = self.token.index("]", start + 3) + 1
+            except ValueError:
                 raise ValueError(f"Bad character set: {self.string}")
-
-            if char == "[":
+            if "[" in self.token[start + 1 : end - 1]:
                 raise ValueError(f"Nested character set: {self.string}")
 
-            if char == "]":
-                length = len(charset)
-                if length > 1 or length == 1 and charset[0] != "^":
-                    break
-
-            elif char == "-" and self._peek() != "]":
-                try:
-                    lo = charset.pop()
-                    hi = self._eat()
-                    char = f"[{lo}{char}{hi}]"
-                except IndexError:  # "-" is the first char in charset
-                    pass
-
+            self.index = end  # 1 char after "]"
+            char = self._join_slice(start, end)
             charset.append(char)
+        else:
+            while char:
+                if char == "[":
+                    raise ValueError(f"Nested character set: {self.string}")
+                if char == "]" and charset:
+                    break
+                elif char == "-" and self._peek() != "]":
+                    try:
+                        lo = charset.pop()
+                        hi = self._eat()
+                        char = f"[{lo}{char}{hi}]"
+                    except IndexError:  # "-" is the first char in charset
+                        pass
+                charset.append(char)
+                char = self._eat()
+            else:
+                raise ValueError(f"Bad character set: {self.string}")
 
         suffix = self._eat_suffix()
 
-        if charset[0] == "^" or suffix and suffix != "?":
-            end = self.index  # from "[" to the end of suffix
-            char = self._get_substr(start, end)
-            hold.append(char)
-        elif not suffix:
-            self.result = [[*x, *hold, y] for x in self.result for y in charset]
-            hold.clear()
-        else:
+        if not suffix:
+            if len(charset) > 1:
+                self.result = [[*x, *hold, y] for x in self.result for y in charset]
+                hold.clear()
+            else:
+                hold.extend(charset)
+        elif suffix == "?":
             self._concat_hold()
             self.result.extend(tuple([*x, y] for x in self.result for y in charset))
-
+        else:
+            end = self.index  # from "[" to the end of suffix
+            char = self._join_slice(start, end)
+            hold.append(char)
         charset.clear()
 
     def _parenStrategy(self, char: str):
@@ -212,14 +244,17 @@ class Parser:
 
         suffixEnd = self.index  # first char after suffix
         if suffixStart < suffixEnd:
-            return self._get_substr(suffixStart, suffixEnd)
+            return self._join_slice(suffixStart, suffixEnd)
 
-    def _get_substr(self, start=0, stop=None) -> str:
+    def _join_slice(self, start=0, stop=None) -> str:
         return "".join(self.token[start:stop])
 
     @property
     def string(self):
-        return self._string if isinstance(self._string, str) else "".join(self._string)
+        try:
+            return self._string if isinstance(self._string, str) else "".join(self._string)
+        except TypeError:
+            return None
 
     @classmethod
     def _is_block(cls, string: str):
@@ -234,7 +269,7 @@ class Parser:
             return False
         b = 0
         for c in cls._parenFinder(string, 1, len(string) - 1):
-            if c == "(":
+            if c.group() == "(":
                 b += 1
             else:
                 b -= 1
@@ -246,12 +281,10 @@ class Parser:
 
 
 class Optimizer:
-
-    _charsetFront = frozenset((c,) for c in "]")
-    _charsetEnd = frozenset((c,) for c in "-")
-
     def __init__(self) -> None:
         self._solver = pywraplp.Solver.CreateSolver("CBC")
+        self._solverQue = deque()
+        self._solverPool = {}
 
     @lru_cache(maxsize=4096)
     def compute(self, tokenSet: frozenset) -> str:
@@ -272,15 +305,16 @@ class Optimizer:
         except KeyError:
             return ""
 
-    def _charsetStrategy(self, tokenSet: set, quantifier: str = "") -> str:
+    @staticmethod
+    def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
 
         if len(tokenSet) > 1:
             char = sorted(chain.from_iterable(tokenSet))
 
-            for c in tokenSet.intersection(self._charsetFront):
-                char.insert(0, char.pop(char.index(c[0])))
-            for c in tokenSet.intersection(self._charsetEnd):
-                char.append(char.pop(char.index(c[0])))
+            if ("]",) in tokenSet:
+                char.insert(0, char.pop(char.index("]")))
+            if ("-",) in tokenSet:
+                char.append(char.pop(char.index("-")))
 
             return f'[{"".join(char)}]{quantifier}'
 
@@ -426,8 +460,8 @@ class Optimizer:
 
         solver = self._solver
         objective = solver.Objective()
-        que = deque()
-        pool = {}
+        que = self._solverQue
+        pool = self._solverPool
 
         while unvisited:
 
