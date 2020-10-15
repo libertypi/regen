@@ -334,6 +334,7 @@ class Optimizer:
         lgroup = self._lgroup
         rgroup = self._rgroup
         remain = self._remain
+        groupKeys = self._solverPool.keys()
         result = []
         que = deque()
         lgroupMirror = defaultdict(list)
@@ -387,9 +388,9 @@ class Optimizer:
             lgroupMirror.clear()
             rgroupMirror.clear()
 
-            for group, optimal in self._group_optimize(connectionKeys, connection):
+            for optimal in self._group_optimize(connectionKeys, connection):
 
-                remain.update(*group)
+                remain.update(*groupKeys)
                 for key in optimal:
                     result.append(connection[key][1])
                     remain.difference_update(key)
@@ -451,14 +452,15 @@ class Optimizer:
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
 
-        - Yields: (Group keys, Optimal keys)
-        - The input set (unvisited) will be emptied.
+        - Yield: Optimal keys
+        - The overall group for each result should be read through self._solverPool.keys()
+        - The input set (unvisited) will be finally emptied, which is an indication of the last group.
         """
 
         if len(unvisited) == 1:
             key = unvisited.pop()
             if connection[key]:
-                yield (), (key,)
+                yield (key,)
             return
 
         solver = self._solver
@@ -505,14 +507,13 @@ class Optimizer:
             if index > 0:
 
                 if index == 1:
-                    optimal = (next(filter(pool.get, pool)),)
+                    yield (next(filter(pool.get, pool)),)
                 else:
                     objective.SetMaximization()
                     if solver.Solve() != solver.OPTIMAL:
                         raise RuntimeError("MIP Solver failed.")
-                    optimal = (k for k, v in pool.items() if v and v.solution_value() == 1)
+                    yield (k for k, v in pool.items() if v and v.solution_value() == 1)
 
-                yield pool.keys(), optimal
                 solver.Clear()
 
             pool.clear()
