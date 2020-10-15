@@ -112,15 +112,15 @@ class Parser:
         char = self._eat()
         if char == "^":
             try:
-                # from 2 chars after "^" to the 1st after "]": [^]C]D (C-D)
+                # search from 2 chars after "^", end = 1 char after "]": [^]C]D (C-D)
                 end = self.token.index("]", start + 3) + 1
             except ValueError:
                 raise ValueError(f"Bad character set: {self.string}")
             if "[" in self.token[start + 1 : end - 1]:
                 raise ValueError(f"Nested character set: {self.string}")
 
-            self.index = end  # 1 char after "]"
-            char = self._join_slice(start, end)
+            self.index = end
+            char = self._join_slice(start, end)  # [..]
             charset.append(char)
         else:
             while char:
@@ -246,7 +246,7 @@ class Parser:
         if suffixStart < suffixEnd:
             return self._join_slice(suffixStart, suffixEnd)
 
-    def _join_slice(self, start=0, stop=None) -> str:
+    def _join_slice(self, start: int, stop: int) -> str:
         return "".join(self.token[start:stop])
 
     @property
@@ -254,7 +254,7 @@ class Parser:
         try:
             return self._string if isinstance(self._string, str) else "".join(self._string)
         except TypeError:
-            return None
+            pass
 
     @classmethod
     def _is_block(cls, string: str):
@@ -352,12 +352,10 @@ class Optimizer:
             for k in right:
                 rgroup[k].add(token)
 
-        lgroup = self._filter_group(lgroup)
-        rgroup = self._filter_group(rgroup)
-        self._lgroup.clear()
-        self._rgroup.clear()
+        que.append((self._filter_group(lgroup), self._filter_group(rgroup)))
+        lgroup.clear()
+        rgroup.clear()
 
-        que.append((lgroup, rgroup))
         while que:
 
             lgroup, rgroup = que.popleft()
@@ -533,7 +531,6 @@ class Regen:
 
     def to_text(self):
         """Extract the regular expressions to a list of corresponding words."""
-
         if self._textList is None:
             self._textList = sorted(map("".join, self._tokens))
         return self._textList
