@@ -24,7 +24,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="extract",
-        help="extract Regex to a list of corresponding words.",
+        help="extract Regex to a list of corresponding words",
     )
     mode_group.add_argument(
         "-c",
@@ -32,7 +32,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="compute",
-        help="compute an optimized regex matching the given text.",
+        help="compute an optimized regex matching the given text",
     )
     parser.set_defaults(mode="compute")
 
@@ -41,14 +41,14 @@ def parse_arguments():
         "--verify",
         dest="verify",
         action="store_true",
-        help="verify the generated regex.",
+        help="verify the generated regex by rematching it against input",
     )
     parser.add_argument(
         "-o",
-        "--omit",
+        "--omit-paren",
         dest="omit",
         action="store_true",
-        help="omit the outer parentheses, if any.",
+        help="omit the outer parentheses, if any",
     )
 
     target_group = parser.add_mutually_exclusive_group(required=True)
@@ -57,14 +57,14 @@ def parse_arguments():
         "--file",
         dest="file",
         type=argparse.FileType("r"),
-        help="take text from FILE, one word per line.",
+        help="take text from FILE, one word per line",
     )
     target_group.add_argument(
         dest="word",
         nargs="*",
         action="store",
         default=(),
-        help="a list of words/regexes, one word per argument.",
+        help="a list of words/regexes, one word per argument",
     )
 
     return parser.parse_args()

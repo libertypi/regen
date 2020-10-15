@@ -285,6 +285,9 @@ class Optimizer:
         self._solver = pywraplp.Solver.CreateSolver("CBC")
         self._solverQue = deque()
         self._solverPool = {}
+        self._lgroup = defaultdict(set)
+        self._rgroup = defaultdict(set)
+        self._remain = set()
 
     @lru_cache(maxsize=4096)
     def compute(self, tokenSet: frozenset) -> str:
@@ -328,16 +331,16 @@ class Optimizer:
             string = "".join(*tokenSet)
             return f"({string}){quantifier}" if quantifier else string
 
+        lgroup = self._lgroup
+        rgroup = self._rgroup
+        remain = self._remain
         result = []
         que = deque()
-        lgroup = defaultdict(set)
-        rgroup = defaultdict(set)
         lgroupMirror = defaultdict(list)
         rgroupMirror = defaultdict(list)
         segment = {}
         connection = {}
         connectionKeys = set()
-        remain = set()
 
         for token in tokenSet:
             left = {token[i:]: token[:i] for i in range(1, len(token))}
@@ -351,8 +354,10 @@ class Optimizer:
 
         lgroup = self._filter_group(lgroup)
         rgroup = self._filter_group(rgroup)
-        que.append((lgroup, rgroup))
+        self._lgroup.clear()
+        self._rgroup.clear()
 
+        que.append((lgroup, rgroup))
         while que:
 
             lgroup, rgroup = que.popleft()
