@@ -14,6 +14,7 @@ class Parser:
     _suffixes = frozenset("*?+{")
     _repetitions = frozenset("*?+")
     _psplit = re.compile(r"[^\\]|\\.").findall
+    _parenFinder = re.compile(r"(?<!\\)[()]").findall
 
     def __init__(self) -> None:
         self.result = [[]]
@@ -49,8 +50,7 @@ class Parser:
             if char == "|":
                 self._concat_hold()
                 yield from map(tuple, self.result)
-                self.result.clear()
-                self.result.append([])
+                self._reset_result()
 
             elif char == "[":
                 self._charsetStrategy()
@@ -75,8 +75,7 @@ class Parser:
 
         self._concat_hold()
         yield from map(tuple, self.result)
-        self.result.clear()
-        self.result.append([])
+        self._reset_result()
         self.index = 0
         self.token = self._string = None
 
@@ -167,6 +166,17 @@ class Parser:
             else:
                 hold.append(f"({substr}){suffix}")
 
+    def _concat_hold(self):
+        hold = self.hold
+        if hold:
+            for s in self.result:
+                s.extend(hold)
+            hold.clear()
+
+    def _reset_result(self):
+        self.result.clear()
+        self.result.append([])
+
     def _eat(self):
         try:
             char = self.token[self.index]
@@ -207,13 +217,6 @@ class Parser:
     def _get_substr(self, start=0, stop=None) -> str:
         return "".join(self.token[start:stop])
 
-    def _concat_hold(self):
-        hold = self.hold
-        if hold:
-            for s in self.result:
-                s.extend(hold)
-            hold.clear()
-
     @property
     def string(self):
         return self._string if isinstance(self._string, str) else "".join(self._string)
@@ -225,12 +228,12 @@ class Parser:
             return True
         return cls.is_parenthesized(string)
 
-    @staticmethod
-    def is_parenthesized(string: str):
-        if not re.fullmatch(r"\(.*(?<!\\)\)", string):
+    @classmethod
+    def is_parenthesized(cls, string: str):
+        if string[0] != "(" or string[-1] != ")" or string[-2] == "\\":
             return False
         b = 0
-        for c in re.compile(r"(?<!\\)[()]").findall(string, 1, len(string) - 1):
+        for c in cls._parenFinder(string, 1, len(string) - 1):
             if c == "(":
                 b += 1
             else:
