@@ -216,7 +216,7 @@ class Parser:
         self.result.append([])
 
     def _eat(self):
-        """Consume one character in token list."""
+        """Consume one character in the token list."""
         try:
             char = self.token[self.index]
             self.index += 1
@@ -307,7 +307,7 @@ class Optimizer:
         else:
             quantifier = ""
 
-        if any(self._token_length(i) > 1 for i in tokenSet):
+        if any(map(self._is_word, tokenSet)):
             return self._wordStrategy(tokenSet, quantifier)
 
         try:
@@ -383,7 +383,7 @@ class Optimizer:
                     string = f"{self.compute(frozenset(i))}{self.compute(frozenset(j))}"
                     length = len(key)
                     value = (
-                        sum(map(self._token_length, key))
+                        sum(map(len, chain.from_iterable(key)))
                         + 0.999 * length
                         + 2 * (length == tokenSetLength)
                         - len(string)
@@ -409,7 +409,7 @@ class Optimizer:
                     remain.clear()
 
         if tokenSet:
-            chars = {i for i in tokenSet if self._token_length(i) == 1}
+            chars = set(filterfalse(self._is_word, tokenSet))
             if chars:
                 tokenSet.difference_update(chars)
                 result.append(self._charsetStrategy(chars))
@@ -422,8 +422,8 @@ class Optimizer:
 
     @staticmethod
     @lru_cache(maxsize=512)
-    def _token_length(token: tuple):
-        return sum(map(len, token))
+    def _is_word(token: tuple):
+        return sum(map(len, token)) > 1
 
     @staticmethod
     def _filter_group(d: dict) -> dict:
@@ -573,8 +573,13 @@ def parse_arguments():
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="ReGenerator",
-        description="Generate regular expressions from a set of words and regexes.",
+        description="""Generate regular expressions from a set of words and regexes.
+Author: David Pi <libertypi@gmail.com>""",
+        epilog="""examples:
+  %(prog)s cat bat at "fat|boat"
+  %(prog)s -e "[AB]C[DE]"
+  %(prog)s -f words.txt""",
+        formatter_class=argparse.RawTextHelpFormatter,
     )
 
     mode_group = parser.add_mutually_exclusive_group()
@@ -592,7 +597,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="compute",
-        help="compute an optimized regex matching the given text",
+        help="compute an optimized regex matching the words (default)",
     )
     parser.set_defaults(mode="compute")
 
