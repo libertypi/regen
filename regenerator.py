@@ -433,13 +433,11 @@ class Optimizer:
         """
         tmp = {}
         for k, v in d.items():
-            if len(v) <= 1:
-                continue
-            key = frozenset(v)
-            length = len(k)
-            if tmp.get(key, (0,))[0] < length:
-                tmp[key] = length, k
-
+            if len(v) > 1:
+                key = frozenset(v)
+                length = len(k)
+                if tmp.get(key, (0,))[0] < length:
+                    tmp[key] = length, k
         return {v[1]: d[v[1]] for v in tmp.values()}
 
     @staticmethod
