@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 Main module for computing regular expressions from a list of strings/regex.
 
@@ -20,8 +22,11 @@ regen.to_regex() -> '(XYZ|[AB]B[CD])'
 regen.to_regex(omitOuterParen=True) -> 'XYZ|[AB]B[CD]'
 
 Other classes in the libary are for internal uses only.
+
+Author: David Pi
 """
 
+__all__ = ["Regen"]
 
 import re
 from collections import defaultdict, deque
@@ -51,9 +56,6 @@ class Parser:
     def parse(self, string):
         """Convert a regular expression to a tokenset."""
 
-        if not string:
-            return
-
         try:
             token = self._psplit(string)
         except TypeError:
@@ -67,9 +69,12 @@ class Parser:
 
         self.token = token
         self._string = string
-        hold = self.hold
 
-        char = self._eat()
+        hold = self.hold
+        eat = self._eat
+        eatsuffix = self._eat_suffix
+
+        char = eat()
         while char:
 
             if char == "|":
@@ -81,13 +86,13 @@ class Parser:
                 self._charsetStrategy()
 
             elif char == "(":
-                self._parenStrategy(char)
+                self._parenStrategy()
 
             elif char in _specials:
                 raise ValueError(f"Invalid character '{char}': '{self.string}'")
 
             else:
-                suffix = self._eat_suffix()
+                suffix = eatsuffix()
                 if not suffix:
                     hold.append(char)
                 elif suffix == "?":
@@ -96,7 +101,7 @@ class Parser:
                 else:
                     hold.append(f"{char}{suffix}")
 
-            char = self._eat()
+            char = eat()
 
         self._concat_hold()
         yield from map(tuple, self.result)
@@ -107,9 +112,10 @@ class Parser:
     def _charsetStrategy(self):
         start = self.index - 1  # including "["
         hold = self.hold
+        eat = self._eat
         charset = self.charset
 
-        char = self._eat()
+        char = eat()
         if char == "^":
             try:
                 # search from 2 chars after "^", end = 1 char after "]": [^]C]D (C-D)
@@ -131,12 +137,12 @@ class Parser:
                 elif char == "-" and self._peek() != "]":
                     try:
                         lo = charset.pop()
-                        hi = self._eat()
+                        hi = eat()
                         char = f"[{lo}{char}{hi}]"
                     except IndexError:  # "-" is the first char in charset
                         pass
                 charset.append(char)
-                char = self._eat()
+                char = eat()
             else:
                 raise ValueError(f"Bad character set: {self.string}")
 
@@ -157,30 +163,30 @@ class Parser:
             hold.append(char)
         charset.clear()
 
-    def _parenStrategy(self, char: str):
+    def _parenStrategy(self):
 
         start = self.index  # 1 char after "("
         hold = self.hold
-        balance = 0
 
-        while char:
+        balance = 1
+        for end, char in enumerate(self.token[start:], start):
             if char == "(":
                 balance += 1
             elif char == ")":
                 balance -= 1
                 if balance == 0:
                     break
-            char = self._eat()
         else:
             raise ValueError(f"Unbalanced parenthesis: {self.string}")
 
-        end = self.index - 1  # index of ")"
+        self.index = end + 1  # 1 char after ")"
+        suffix = self._eat_suffix()
+        if start == end:  # empty group
+            return
 
         if self.subParser is None:
             self.subParser = Parser()
-
         subToken = self.subParser.parse(self.token[start:end])
-        suffix = self._eat_suffix()
 
         if not suffix:
             self.result = [[*x, *hold, *y] for y in subToken for x in self.result]
@@ -210,6 +216,7 @@ class Parser:
         self.result.append([])
 
     def _eat(self):
+        """Consume one character in token list."""
         try:
             char = self.token[self.index]
             self.index += 1
@@ -398,9 +405,7 @@ class Optimizer:
 
                 if remain:
                     target = self._copy_group if connectionKeys else self._update_group
-                    subLgroup = target(lgroup, remain)
-                    subRgroup = target(rgroup, remain)
-                    que.append((subLgroup, subRgroup))
+                    que.append((target(lgroup, remain), target(rgroup, remain)))
                     remain.clear()
 
         if tokenSet:
@@ -559,3 +564,102 @@ class Regen:
         pattern = re.compile(regex)
         for i in filterfalse(pattern.fullmatch, frozenset(chain(self.wordlist, text))):
             assert not _specials.isdisjoint(i), f"Computed regex does not fully match this word: '{i}'"
+
+        return True
+
+
+def parse_arguments():
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="ReGenerator",
+        description="Generate regular expressions from a set of words and regexes.",
+    )
+
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument(
+        "-e",
+        "--extract",
+        dest="mode",
+        action="store_const",
+        const="extract",
+        help="extract Regex to a list of corresponding words",
+    )
+    mode_group.add_argument(
+        "-c",
+        "--compute",
+        dest="mode",
+        action="store_const",
+        const="compute",
+        help="compute an optimized regex matching the given text",
+    )
+    parser.set_defaults(mode="compute")
+
+    parser.add_argument(
+        "-v",
+        "--verify",
+        dest="verify",
+        action="store_true",
+        help="verify the generated regex by rematching it against input",
+    )
+    parser.add_argument(
+        "-o",
+        "--omit-paren",
+        dest="omit",
+        action="store_true",
+        help="omit the outer parentheses, if any",
+    )
+
+    target_group = parser.add_mutually_exclusive_group(required=True)
+    target_group.add_argument(
+        "-f",
+        "--file",
+        dest="file",
+        type=argparse.FileType("r"),
+        help="take text from FILE, one word per line",
+    )
+    target_group.add_argument(
+        dest="word",
+        nargs="*",
+        action="store",
+        default=(),
+        help="a list of words/regexes, one word per argument",
+    )
+
+    return parser.parse_args()
+
+
+def main():
+
+    args = parse_arguments()
+
+    if args.file is None:
+        wordlist = args.word
+    else:
+        wordlist = tuple(filter(None, args.file.read().splitlines()))
+        args.file.close()
+
+    regen = Regen(wordlist)
+
+    if args.mode == "extract":
+        for word in regen.to_text():
+            print(word)
+
+    else:
+        regex = regen.to_regex(omitOuterParen=args.omit)
+        print(regex)
+
+        if args.verify:
+            print("\nLength:", len(regex))
+            print("Verifying... ", end="")
+            try:
+                regen.verify_result()
+            except AssertionError as e:
+                print("failed:", e)
+            else:
+                print("passed.")
+
+
+if __name__ == "__main__":
+    main()

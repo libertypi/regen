@@ -3,8 +3,7 @@
 import os.path
 import unittest
 
-from regenerator import Regen
-from regenerator.gen import Parser
+from regenerator import Regen, Parser
 
 
 class Testregen(unittest.TestCase):
@@ -19,7 +18,7 @@ class Testregen(unittest.TestCase):
             (r"sky(237)?", ["sky", "sky237"]),
             (r"[ _-]?", ["", " ", "-", "_"]),
             (r"A[B3-5]C", ["ABC", "A[3-5]C"]),
-            (r"AB|CD", ["AB", "CD"]),
+            (r"AB|C()D", ["AB", "CD"]),
             (r"(A(B|C(D|E)*)*|F)", ["A(B|C[DE]*)*", "F"]),
             (r"A(\B*\C|\D)?", ["A", "A\\B*\\C", "A\\D"]),
             (r"(ABC)*", ["(ABC)*"]),
