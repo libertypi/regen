@@ -537,7 +537,7 @@ class Regen:
         """Extract the regular expressions to a list of corresponding words."""
         if self._text is None:
             self._text = sorted(map("".join, self._tokens))
-        return self._text.copy()
+        return iter(self._text)
 
     def to_regex(self, omitOuterParen: bool = False) -> str:
         """Return an optimized regular expression matching all the words.
@@ -560,8 +560,7 @@ class Regen:
             raise ValueError("Extraction from computed regex is different from that of original wordlist.")
 
         pattern = re.compile(regex)
-        text = self.to_text() if self._text is None else self._text
-        for i in filterfalse(pattern.fullmatch, frozenset(chain(self.wordlist, text))):
+        for i in filterfalse(pattern.fullmatch, frozenset(chain(self.wordlist, self.to_text()))):
             if _specials.isdisjoint(i):
                 raise ValueError(f"Computed regex does not fully match this word: '{i}'")
 
