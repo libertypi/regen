@@ -37,22 +37,6 @@ class Testregen(unittest.TestCase):
             with self.assertRaises(ValueError, msg=regex):
                 Regen([regex]).to_text()
 
-    def test_is_block(self):
-        trueValues = ("A", r"\n", "[AB]", "[^AB]", "(AB|C)")
-        falseValues = ("A?", "AB", r"\nA", "[AB]?", "A[BC]", "AB|C", "(AB)*", "(AB|CD)?", "(A[BC]?){5}")
-        for v in trueValues:
-            self.assertTrue(Parser._is_block(v), msg=v)
-        for v in falseValues:
-            self.assertFalse(Parser._is_block(v), msg=v)
-
-    def test_is_parenthesized(self):
-        trueValues = (r"(AB|CD)", r"(A(B(C(D[EF]G))))", r"(AB(CD)E(FG)H)", r"(A\\\\)")
-        falseValues = ("A", "[AB]", "A(B|C)", "(AB)*C", "(AB|CD)?", "(AB)C(DE)", r"(AB|CD\)", r"(AB|CD\\\)")
-        for v in trueValues:
-            self.assertTrue(Parser.is_parenthesized(v), msg=v)
-        for v in falseValues:
-            self.assertFalse(Parser.is_parenthesized(v), msg=v)
-
     def test_optimizer(self):
         values = (
             (("ACD", "ACE", "BCD", "BCE"), "[AB]C[DE]"),

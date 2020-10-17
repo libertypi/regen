@@ -44,6 +44,7 @@ class Parser:
     _suffixes = frozenset("*?+{")
     _repetitions = frozenset("*?+")
     _psplit = re.compile(r"[^\\]|\\.").findall
+    _is_char_block = re.compile(r"\\?.|\[(\^?\])?([^]]|\\\])*\]").fullmatch
 
     def __init__(self) -> None:
         self.result = [[]]
@@ -196,12 +197,8 @@ class Parser:
         else:
             if self.optimizer is None:
                 self.optimizer = Optimizer()
-            substr = self.optimizer.compute(frozenset(subToken))
-
-            if self._is_block(substr):
-                hold.append(f"{substr}{suffix}")
-            else:
-                hold.append(f"({substr}){suffix}")
+            substr = self.optimizer.compute(frozenset(subToken), omitOuterParen=True)
+            hold.append(f"{substr}{suffix}" if self._is_char_block(substr) else f"({substr}){suffix}")
 
     def _concat_hold(self):
         hold = self.hold
@@ -262,34 +259,6 @@ class Parser:
         except TypeError:
             pass
 
-    @classmethod
-    def _is_block(cls, string: str):
-        """Return True if the string is like: A, [AB], (AB|CD)."""
-        if re.fullmatch(r"\\?.|\[(\^?\])?([^]]|\\\])*\]", string):
-            return True
-        return cls.is_parenthesized(string)
-
-    @classmethod
-    def is_parenthesized(cls, string: str):
-        if string[0] != "(":
-            return False
-
-        token = cls._psplit(string, 1)
-        if token.pop() != ")":
-            return False
-
-        b = 0
-        for c in token:
-            if c == "(":
-                b += 1
-            elif c == ")":
-                b -= 1
-                if b < 0:
-                    return False
-        if b != 0:
-            raise ValueError(f'Unbalanced brackets in regex: "{string}"')
-        return True
-
 
 class Optimizer:
     def __init__(self) -> None:
@@ -301,7 +270,7 @@ class Optimizer:
         self._remain = set()
 
     @lru_cache(maxsize=4096)
-    def compute(self, tokenSet: frozenset) -> str:
+    def compute(self, tokenSet: frozenset, omitOuterParen: bool = False) -> str:
         """Compute an optimized regular expression for the given tokenset."""
 
         tokenSet = set(tokenSet)
@@ -312,7 +281,7 @@ class Optimizer:
             quantifier = ""
 
         if any(map(self._is_word, tokenSet)):
-            return self._wordStrategy(tokenSet, quantifier)
+            return self._wordStrategy(tokenSet, quantifier, omitOuterParen)
 
         try:
             return self._charsetStrategy(tokenSet, quantifier)
@@ -334,7 +303,7 @@ class Optimizer:
 
         return f"{tokenSet.pop()[0]}{quantifier}"
 
-    def _wordStrategy(self, tokenSet: set, quantifier: str) -> str:
+    def _wordStrategy(self, tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
         tokenSetLength = len(tokenSet)
 
@@ -422,7 +391,9 @@ class Optimizer:
         result.sort()
         string = "|".join(result)
 
-        return f"({string}){quantifier}" if quantifier or len(result) > 1 else string
+        if quantifier or len(result) > 1 and not omitOuterParen:
+            return f"({string}){quantifier}"
+        return string
 
     @staticmethod
     @lru_cache(maxsize=512)
@@ -528,43 +499,46 @@ class Optimizer:
 
 class Regen:
     def __init__(self, wordlist: list) -> None:
-
         if not isinstance(wordlist, (list, tuple, set)):
             raise TypeError("Input should be a list of strings.")
 
-        self.wordlist = wordlist
         parser = Parser()
         self._tokens = frozenset(chain.from_iterable(map(parser.parse, wordlist)))
-        self._textList = self._regex = None
+        self.wordlist = wordlist
+        self._text = None
+        self._regex = [None, None]
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.wordlist})"
 
     def to_text(self):
         """Extract the regular expressions to a list of corresponding words."""
-        if self._textList is None:
-            self._textList = sorted(map("".join, self._tokens))
-        return self._textList
+        if self._text is None:
+            self._text = sorted(map("".join, self._tokens))
+        return self._text.copy()
 
-    def to_regex(self, omitOuterParen: bool = False):
+    def to_regex(self, omitOuterParen: bool = False) -> str:
         """Return an optimized regular expression matching all the words.
 
         :omitOuterParen: If True, the outmost parentheses (if any) will be omited.
         """
-        if self._regex is None:
-            self._regex = Optimizer().compute(self._tokens)
-
-        if omitOuterParen and Parser.is_parenthesized(self._regex):
-            return self._regex[1:-1]
-
-        return self._regex
+        if not isinstance(omitOuterParen, bool):
+            raise TypeError("omitOuterParen should be bool.")
+        if self._regex[omitOuterParen] is None:
+            self._regex[omitOuterParen] = Optimizer().compute(self._tokens, omitOuterParen=omitOuterParen)
+        return self._regex[omitOuterParen]
 
     def verify_result(self):
-        text = self.to_text()
-        regex = self.to_regex()
+        try:
+            regex = next(i for i in self._regex if i is not None)
+        except StopIteration:
+            regex = self.to_regex()
 
-        secondText = Regen([regex]).to_text()
-        if text != secondText:
+        if self._tokens != Regen([regex])._tokens:
             raise ValueError("Extraction from computed regex is different from that of original wordlist.")
 
         pattern = re.compile(regex)
+        text = self.to_text() if self._text is None else self._text
         for i in filterfalse(pattern.fullmatch, frozenset(chain(self.wordlist, text))):
             if _specials.isdisjoint(i):
                 raise ValueError(f"Computed regex does not fully match this word: '{i}'")
