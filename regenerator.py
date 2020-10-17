@@ -44,7 +44,6 @@ class Parser:
     _suffixes = frozenset("*?+{")
     _repetitions = frozenset("*?+")
     _psplit = re.compile(r"[^\\]|\\.").findall
-    _parenFinder = re.compile(r"(?<!\\)[()]").finditer
 
     def __init__(self) -> None:
         self.result = [[]]
@@ -272,18 +271,23 @@ class Parser:
 
     @classmethod
     def is_parenthesized(cls, string: str):
-        if string[0] != "(" or string[-1] != ")" or string[-2] == "\\":
+        if string[0] != "(":
             return False
+
+        token = cls._psplit(string, 1)
+        if token.pop() != ")":
+            return False
+
         b = 0
-        for c in cls._parenFinder(string, 1, len(string) - 1):
-            if c.group() == "(":
+        for c in token:
+            if c == "(":
                 b += 1
-            else:
+            elif c == ")":
                 b -= 1
                 if b < 0:
                     return False
         if b != 0:
-            raise RuntimeError(f'Unbalanced brackets in regex: "{string}"')
+            raise ValueError(f'Unbalanced brackets in regex: "{string}"')
         return True
 
 
@@ -379,6 +383,7 @@ class Optimizer:
 
             for key, i, j in chain(left, right):
                 key = frozenset().union(*key)
+                connectionKeys.add(key)
                 if key not in connection:
                     string = f"{self.compute(frozenset(i))}{self.compute(frozenset(j))}"
                     length = len(key)
@@ -390,7 +395,6 @@ class Optimizer:
                         - 1
                     )
                     connection[key] = (value, string) if value > 0 else None
-                connectionKeys.add(key)
 
             lgroupMirror.clear()
             rgroupMirror.clear()
@@ -456,8 +460,8 @@ class Optimizer:
         length reduction.
 
         - Yield: Optimal keys
-        - The overall group for each result should be read through self._solverPool.keys()
-        - The input set (unvisited) will be finally emptied, which is an indication of the last group.
+        - The overall group of each result should be read via self._solverPool.keys()
+        - The input set (1st arg) will be finally emptied, which is an indication of the last group.
         """
 
         if len(unvisited) == 1:
@@ -557,11 +561,13 @@ class Regen:
         regex = self.to_regex()
 
         secondText = Regen([regex]).to_text()
-        assert text == secondText, "Extraction from computed regex is different from that of original wordlist."
+        if text != secondText:
+            raise ValueError("Extraction from computed regex is different from that of original wordlist.")
 
         pattern = re.compile(regex)
         for i in filterfalse(pattern.fullmatch, frozenset(chain(self.wordlist, text))):
-            assert not _specials.isdisjoint(i), f"Computed regex does not fully match this word: '{i}'"
+            if _specials.isdisjoint(i):
+                raise ValueError(f"Computed regex does not fully match this word: '{i}'")
 
         return True
 
@@ -658,7 +664,7 @@ def main():
             print("Verifying... ", end="")
             try:
                 regen.verify_result()
-            except AssertionError as e:
+            except ValueError as e:
                 print("failed:", e)
             else:
                 print("passed.")

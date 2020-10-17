@@ -46,8 +46,8 @@ class Testregen(unittest.TestCase):
             self.assertFalse(Parser._is_block(v), msg=v)
 
     def test_is_parenthesized(self):
-        trueValues = (r"(AB|CD)", r"(A(B(C(D[EF]G))))", r"(AB(CD)E(FG)H)")
-        falseValues = ("A", "[AB]", "A(B|C)", "(AB)*C", "(AB|CD)?", "(AB)C(DE)", r"(AB|CD\)")
+        trueValues = (r"(AB|CD)", r"(A(B(C(D[EF]G))))", r"(AB(CD)E(FG)H)", r"(A\\\\)")
+        falseValues = ("A", "[AB]", "A(B|C)", "(AB)*C", "(AB|CD)?", "(AB)C(DE)", r"(AB|CD\)", r"(AB|CD\\\)")
         for v in trueValues:
             self.assertTrue(Parser.is_parenthesized(v), msg=v)
         for v in falseValues:
