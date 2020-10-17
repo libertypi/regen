@@ -52,6 +52,9 @@ class Testregen(unittest.TestCase):
                 "(atk|cruel|tonights)girlfriends?",
             ),
             (("A|B*",), "(A|B*)"),
+            (("AB|AC",), "A[BC]"),
+            (("[BA]?[DC]?[FE]?",), "[AB]?[CD]?[EF]?"),
+            (("(ab|cd)?(ef|gh)?", "[BA]?[DC]?[FE]?"), "((ab|cd)?(ef|gh)?|[AB]?[CD]?[EF]?)"),
         )
         for wordlist, answer in values:
             self.assertEqual(Regen(wordlist).to_regex(), answer)

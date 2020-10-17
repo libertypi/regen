@@ -306,7 +306,6 @@ class Optimizer:
     def _wordStrategy(self, tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
         tokenSetLength = len(tokenSet)
-
         if tokenSetLength == 1:
             string = "".join(*tokenSet)
             return f"({string}){quantifier}" if quantifier else string
@@ -322,6 +321,7 @@ class Optimizer:
         segment = {}
         connection = {}
         connectionKeys = set()
+        frozenUnion = frozenset().union
 
         for token in tokenSet:
             left = {token[i:]: token[:i] for i in range(1, len(token))}
@@ -337,6 +337,10 @@ class Optimizer:
         lgroup.clear()
         rgroup.clear()
 
+        if quantifier:
+            tokenSet.add(())
+            quantifier = ""
+
         while que:
 
             lgroup, rgroup = que.popleft()
@@ -347,11 +351,11 @@ class Optimizer:
                 for k, v in group.items():
                     target[frozenset(segment[j][i][k] for j in v)].append(k)
 
-            left = ((map(lgroup.get, v), k, v) for k, v in lgroupMirror.items())
-            right = ((map(rgroup.get, v), v, k) for k, v in rgroupMirror.items())
+            left = ((frozenUnion(*map(lgroup.get, v)), k, v) for k, v in lgroupMirror.items())
+            right = ((frozenUnion(*map(rgroup.get, v)), v, k) for k, v in rgroupMirror.items())
+            addition = self._build_addition(tokenSet, lgroupMirror, rgroupMirror)
 
-            for key, i, j in chain(left, right):
-                key = frozenset().union(*key)
+            for key, i, j in chain(left, right, addition):
                 connectionKeys.add(key)
                 if key not in connection:
                     string = f"{self.compute(frozenset(i))}{self.compute(frozenset(j))}"
@@ -380,6 +384,10 @@ class Optimizer:
                     target = self._copy_group if connectionKeys else self._update_group
                     que.append((target(lgroup, remain), target(rgroup, remain)))
                     remain.clear()
+
+        if () in tokenSet:
+            quantifier = "?"
+            tokenSet.remove(())
 
         if tokenSet:
             chars = set(filterfalse(self._is_word, tokenSet))
@@ -416,6 +424,17 @@ class Optimizer:
         return {v[1]: d[v[1]] for v in tmp.values()}
 
     @staticmethod
+    def _build_addition(tokenSet: set, lgroupMirror: dict, rgroupMirror: dict):
+        for k in filter(tokenSet.issuperset, lgroupMirror):
+            v = lgroupMirror[k].copy()
+            v.append(())
+            yield frozenset(x + y for x in k for y in v), k, v
+        for k in filter(tokenSet.issuperset, rgroupMirror):
+            v = rgroupMirror[k].copy()
+            v.append(())
+            yield frozenset(x + y for x in v for y in k), v, k
+
+    @staticmethod
     def _update_group(group: dict, refer: set) -> dict:
         for v in group.values():
             v.intersection_update(refer)
@@ -445,6 +464,7 @@ class Optimizer:
         objective = solver.Objective()
         que = self._solverQue
         pool = self._solverPool
+        empty = frozenset(((),))
 
         while unvisited:
 
@@ -464,6 +484,8 @@ class Optimizer:
                 currentKey = que.popleft()
                 currentVar = pool[currentKey]
                 unvisited.remove(currentKey)
+                if () in currentKey:
+                    currentKey = currentKey.difference(empty)
 
                 for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
                     try:
