@@ -238,6 +238,7 @@ class Parser:
                 assert self._rangeChars.issuperset(self.token[suffixStart + 1 : suffixEnd])
             except (ValueError, AssertionError):
                 raise ValueError(f"Bad range format: {self.string}")
+
             self.index = suffixEnd + 1  # 1 char after "}"
             char = self._peek()
 
@@ -315,10 +316,12 @@ class Optimizer:
         remain = self._remain
         groupKeys = self._solverPool.keys()
         result = []
-        que = deque()
         segment = {}
         candidate = {}
+        que = deque()
         candidateKeys = set()
+        mirror = defaultdict(list)
+        frozenUnion = frozenset().union
 
         for token in tokenSet:
             left = {token[:i]: token[i:] for i in range(1, len(token))}
@@ -344,19 +347,34 @@ class Optimizer:
             if not (prefix or suffix):
                 continue
 
-            for key, i, j in self._process_group(prefix, suffix, segment, tokenSet):
-                candidateKeys.add(key)
-                if key not in candidate:
-                    string = f"{self.compute(frozenset(i))}{self.compute(frozenset(j))}"
-                    length = len(key)
-                    value = (
-                        sum(map(len, chain.from_iterable(key)))
-                        + 0.999 * length
-                        + 2 * (length == tokenSetLength)
-                        - len(string)
-                        - 1
-                    )
-                    candidate[key] = (value, string) if value > 0 else None
+            for source, i in (prefix, 0), (suffix, 1):
+
+                for k, v in source.items():
+                    mirror[frozenset(segment[j][i][k] for j in v)].append(k)
+
+                for k, v in mirror.items():
+                    if tokenSet.issuperset(k):
+                        key = k.union(*map(source.get, v))
+                        v.append(())
+                    else:
+                        key = frozenUnion(*map(source.get, v))
+
+                    if key not in candidate:
+                        left = self.compute(k)
+                        right = self.compute(frozenset(v))
+                        string = f"{left}{right}" if i else f"{right}{left}"
+                        length = len(key)
+                        value = (
+                            sum(map(len, chain.from_iterable(key)))
+                            + 0.999 * length
+                            + 2 * (length == tokenSetLength)
+                            - len(string)
+                            - 1
+                        )
+                        candidate[key] = (value, string) if value > 0 else None
+                    candidateKeys.add(key)
+
+                mirror.clear()
 
             for optimal in self._optimize_group(candidateKeys, candidate):
 
@@ -371,10 +389,11 @@ class Optimizer:
                     que.append((target(prefix, remain), target(suffix, remain)))
                     remain.clear()
 
-        if () in tokenSet:
-            tokenSet.remove(())
-        else:
-            quantifier = ""
+        if quantifier:
+            try:
+                tokenSet.remove(())
+            except KeyError:
+                quantifier = ""
 
         if tokenSet:
             chars = set(filterfalse(self._is_word, tokenSet))
@@ -402,12 +421,9 @@ class Optimizer:
         - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
         """
         tmp = {}
-        for k, v in d.items():
-            if len(v) > 1:
-                key = frozenset(v)
-                length = len(k)
-                if tmp.get(key, (0,))[0] < length:
-                    tmp[key] = length, k
+        for n, k, v in ((len(k), frozenset(v), k) for k, v in d.items() if len(v) > 1):
+            if tmp.get(k, (0,))[0] < n:
+                tmp[k] = n, v
         return {v[1]: d[v[1]] for v in tmp.values()}
 
     @staticmethod
@@ -418,33 +434,8 @@ class Optimizer:
 
     @staticmethod
     def _copy_affix(d: dict, r: set) -> dict:
-        intersect = r.intersection
-        return {k: i for k, v in d.items() if len(i := intersect(v)) > 1}
-
-    @staticmethod
-    def _process_group(prefix: dict, suffix: dict, segment: dict, tokenSet: set):
-        mirror = defaultdict(list)
-        all_in_set = tokenSet.issuperset
-        frozen_union = frozenset().union
-
-        for k, v in prefix.items():
-            mirror[frozenset(segment[i][0][k] for i in v)].append(k)
-        for k, v in mirror.items():
-            if all_in_set(k):
-                v.append(())
-                yield frozenset(x + y for x in v for y in k), v, k
-            else:
-                yield frozen_union(*map(prefix.get, v)), v, k
-
-        mirror.clear()
-        for k, v in suffix.items():
-            mirror[frozenset(segment[i][1][k] for i in v)].append(k)
-        for k, v in mirror.items():
-            if all_in_set(k):
-                v.append(())
-                yield frozenset(x + y for x in k for y in v), k, v
-            else:
-                yield frozen_union(*map(suffix.get, v)), k, v
+        f = r.intersection
+        return {k: i for k, v in d.items() if len(i := f(v)) > 1}
 
     def _optimize_group(self, unvisited: set, candidate: dict):
         """Groups combinations in the way that each group is internally connected with common
