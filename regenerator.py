@@ -317,8 +317,8 @@ class Optimizer:
         result = []
         que = deque()
         segment = {}
-        connection = {}
-        connectionKeys = set()
+        candidate = {}
+        candidateKeys = set()
 
         for token in tokenSet:
             left = {token[:i]: token[i:] for i in range(1, len(token))}
@@ -336,7 +336,6 @@ class Optimizer:
 
         if quantifier:
             tokenSet.add(())
-            quantifier = ""
             tokenSetLength += 1
 
         while que:
@@ -346,8 +345,8 @@ class Optimizer:
                 continue
 
             for key, i, j in self._process_group(prefix, suffix, segment, tokenSet):
-                connectionKeys.add(key)
-                if key not in connection:
+                candidateKeys.add(key)
+                if key not in candidate:
                     string = f"{self.compute(frozenset(i))}{self.compute(frozenset(j))}"
                     length = len(key)
                     value = (
@@ -357,24 +356,25 @@ class Optimizer:
                         - len(string)
                         - 1
                     )
-                    connection[key] = (value, string) if value > 0 else None
+                    candidate[key] = (value, string) if value > 0 else None
 
-            for optimal in self._optimize_group(connectionKeys, connection):
+            for optimal in self._optimize_group(candidateKeys, candidate):
 
                 remain.update(*groupKeys)
                 for key in optimal:
-                    result.append(connection[key][1])
+                    result.append(candidate[key][1])
                     remain.difference_update(key)
                     tokenSet.difference_update(key)
 
                 if remain:
-                    target = self._copy_affix if connectionKeys else self._update_affix
+                    target = self._copy_affix if candidateKeys else self._update_affix
                     que.append((target(prefix, remain), target(suffix, remain)))
                     remain.clear()
 
         if () in tokenSet:
-            quantifier = "?"
             tokenSet.remove(())
+        else:
+            quantifier = ""
 
         if tokenSet:
             chars = set(filterfalse(self._is_word, tokenSet))
@@ -446,7 +446,7 @@ class Optimizer:
             else:
                 yield frozen_union(*map(suffix.get, v)), k, v
 
-    def _optimize_group(self, unvisited: set, connection: dict):
+    def _optimize_group(self, unvisited: set, candidate: dict):
         """Groups combinations in the way that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
@@ -458,7 +458,7 @@ class Optimizer:
 
         if len(unvisited) == 1:
             key = unvisited.pop()
-            if connection[key]:
+            if candidate[key]:
                 yield (key,)
             return
 
@@ -471,7 +471,7 @@ class Optimizer:
 
             index = 0
             currentKey = next(iter(unvisited))
-            value = connection[currentKey]
+            value = candidate[currentKey]
             if value:
                 currentVar = solver.BoolVar(f"{index}")
                 objective.SetCoefficient(currentVar, value[0])
@@ -492,7 +492,7 @@ class Optimizer:
                     try:
                         nextVar = pool[nextKey]
                     except KeyError:
-                        value = connection[nextKey]
+                        value = candidate[nextKey]
                         if value:
                             nextVar = solver.BoolVar(f"{index}")
                             objective.SetCoefficient(nextVar, value[0])
