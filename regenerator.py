@@ -300,7 +300,6 @@ class Optimizer:
 
         return f"{tokenSet.pop()[0]}{quantifier}"
 
-    @profile
     def _wordStrategy(self, tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
         tokenSetLength = len(tokenSet)
