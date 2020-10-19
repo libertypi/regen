@@ -29,11 +29,11 @@ Author: David Pi
 __all__ = ["Regen"]
 
 import re
-from collections import defaultdict, deque
+from collections import defaultdict
 from functools import lru_cache
 from itertools import chain, filterfalse
 
-from ortools.linear_solver import pywraplp
+from ortools.sat.python import cp_model
 
 _specials = frozenset("{}()[]|?*+")
 
@@ -263,12 +263,8 @@ class Parser:
 
 class Optimizer:
     def __init__(self) -> None:
-        self._solver = pywraplp.Solver.CreateSolver("CBC")
-        self._solverQue = deque()
-        self._solverPool = {}
         self._prefix = defaultdict(set)
         self._suffix = defaultdict(set)
-        self._remain = set()
 
     @lru_cache(maxsize=4096)
     def compute(self, tokenSet: frozenset, omitOuterParen: bool = False) -> str:
@@ -304,6 +300,7 @@ class Optimizer:
 
         return f"{tokenSet.pop()[0]}{quantifier}"
 
+    @profile
     def _wordStrategy(self, tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
         tokenSetLength = len(tokenSet)
@@ -311,41 +308,36 @@ class Optimizer:
             string = "".join(*tokenSet)
             return f"({string}){quantifier}" if quantifier else string
 
-        prefix = self._prefix
-        suffix = self._suffix
-        remain = self._remain
-        groupKeys = self._solverPool.keys()
         result = []
         segment = {}
         candidate = {}
-        que = deque()
         candidateKeys = set()
         mirror = defaultdict(list)
         frozenUnion = frozenset().union
+        prefix = self._prefix
+        suffix = self._suffix
 
         for token in tokenSet:
             left = {token[:i]: token[i:] for i in range(1, len(token))}
             right = {v: k for k, v in left.items()}
             left[token] = right[token] = ()
             segment[token] = left, right
-            for i in left:
-                prefix[i].add(token)
-            for i in right:
-                suffix[i].add(token)
+            for k in left:
+                prefix[k].add(token)
+            for k in right:
+                suffix[k].add(token)
 
-        que.append((self._filter_affix(prefix), self._filter_affix(suffix)))
-        prefix.clear()
-        suffix.clear()
+        prefix = self._filter_affix(prefix)
+        suffix = self._filter_affix(suffix)
+        self._prefix.clear()
+        self._suffix.clear()
 
         if quantifier:
             tokenSet.add(())
             tokenSetLength += 1
+        factor = self._get_factor(tokenSetLength)
 
-        while que:
-
-            prefix, suffix = que.popleft()
-            if not (prefix or suffix):
-                continue
+        while prefix or suffix:
 
             for source, i in (prefix, 0), (suffix, 1):
 
@@ -362,32 +354,32 @@ class Optimizer:
                     if key not in candidate:
                         left = self.compute(k)
                         right = self.compute(frozenset(v))
-                        string = f"{left}{right}" if i else f"{right}{left}"
+                        string = (left + right) if i else (right + left)
                         length = len(key)
                         value = (
                             sum(map(len, chain.from_iterable(key)))
-                            + 0.999 * length
+                            + length
                             + 2 * (length == tokenSetLength)
                             - len(string)
                             - 1
-                        )
+                        ) * factor - length
                         candidate[key] = (value, string) if value > 0 else None
-                    candidateKeys.add(key)
+
+                    if candidate[key]:
+                        candidateKeys.add(key)
 
                 mirror.clear()
 
-            for optimal in self._optimize_group(candidateKeys, candidate):
+            key = None
+            for key in self._optimize_group(candidateKeys, candidate):
+                result.append(candidate[key][1])
+                tokenSet.difference_update(key)
 
-                remain.update(*groupKeys)
-                for key in optimal:
-                    result.append(candidate[key][1])
-                    remain.difference_update(key)
-                    tokenSet.difference_update(key)
+            if not key or not tokenSet:
+                break
 
-                if remain:
-                    target = self._copy_affix if candidateKeys else self._update_affix
-                    que.append((target(prefix, remain), target(suffix, remain)))
-                    remain.clear()
+            prefix = self._update_affix(prefix, tokenSet)
+            suffix = self._update_affix(suffix, tokenSet)
 
         if quantifier:
             try:
@@ -397,7 +389,7 @@ class Optimizer:
 
         if tokenSet:
             chars = set(filterfalse(self._is_word, tokenSet))
-            if chars:
+            if len(chars) > 2:
                 tokenSet.difference_update(chars)
                 result.append(self._charsetStrategy(chars))
             result.extend(map("".join, tokenSet))
@@ -405,7 +397,7 @@ class Optimizer:
         result.sort()
         string = "|".join(result)
 
-        if quantifier or len(result) > 1 and not omitOuterParen:
+        if len(result) > 1 and not omitOuterParen or quantifier:
             return f"({string}){quantifier}"
         return string
 
@@ -415,16 +407,28 @@ class Optimizer:
         return sum(map(len, token)) > 1
 
     @staticmethod
+    def _get_factor(i: int) -> int:
+        """Get the multiplication factor for value calculations."""
+        n = 0
+        while i:
+            i //= 10
+            n += 1
+        return 10 ** n
+
+    @staticmethod
     def _filter_affix(d: dict) -> dict:
         """Keep groups which divide the same words at max common subsequence, and remove single member groups.
 
         - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
         """
         tmp = {}
-        for n, k, v in ((len(k), frozenset(v), k) for k, v in d.items() if len(v) > 1):
-            if tmp.get(k, (0,))[0] < n:
-                tmp[k] = n, v
-        return {v[1]: d[v[1]] for v in tmp.values()}
+        for k, v in d.items():
+            if len(v) > 1:
+                n = len(k)
+                key = frozenset(v)
+                if tmp.get(key, (0,))[0] < n:
+                    tmp[key] = n, k
+        return {v: d[v] for _, v in tmp.values()}
 
     @staticmethod
     def _update_affix(d: dict, r: set) -> dict:
@@ -433,49 +437,39 @@ class Optimizer:
         return {k: v for k, v in d.items() if len(v) > 1}
 
     @staticmethod
-    def _copy_affix(d: dict, r: set) -> dict:
-        f = r.intersection
-        return {k: i for k, v in d.items() if len(i := f(v)) > 1}
-
-    def _optimize_group(self, unvisited: set, candidate: dict):
+    def _optimize_group(unvisited: set, candidate: dict):
         """Groups combinations in the way that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
 
         - Yield: Optimal keys
-        - The overall group of each result should be read via self._solverPool.keys()
-        - The input set (1st arg) will be finally emptied, which is an indication of the last group.
+        - The input set (1st arg) will be finally emptied.
         """
 
-        if len(unvisited) == 1:
-            key = unvisited.pop()
-            if candidate[key]:
-                yield (key,)
+        if len(unvisited) <= 1:
+            try:
+                yield unvisited.pop()
+            except KeyError:
+                pass
             return
 
-        solver = self._solver
-        objective = solver.Objective()
-        que = self._solverQue
-        pool = self._solverPool
+        pool = {}
+        stack = []
 
         while unvisited:
 
-            index = 0
-            currentKey = next(iter(unvisited))
-            value = candidate[currentKey]
-            if value:
-                currentVar = solver.BoolVar(f"{index}")
-                objective.SetCoefficient(currentVar, value[0])
-                index += 1
-            else:
-                currentVar = None
+            model = cp_model.CpModel()
+            currentKey = unvisited.pop()
+            currentVar = model.NewBoolVar("0")
+            index = 1
             pool[currentKey] = currentVar
-            que.append(currentKey)
+            stack.append(currentKey)
 
-            while que:
-                currentKey = que.popleft()
-                currentVar = pool[currentKey]
-                unvisited.remove(currentKey)
+            while stack:
+                currentKey = stack.pop()
+                unvisited.discard(currentKey)
+                currentVarNot = pool[currentKey].Not()
+
                 if () in currentKey:
                     currentKey = currentKey.difference(((),))
 
@@ -483,32 +477,26 @@ class Optimizer:
                     try:
                         nextVar = pool[nextKey]
                     except KeyError:
-                        value = candidate[nextKey]
-                        if value:
-                            nextVar = solver.BoolVar(f"{index}")
-                            objective.SetCoefficient(nextVar, value[0])
-                            index += 1
-                        else:
-                            nextVar = None
+                        nextVar = model.NewBoolVar(f"{index}")
+                        index += 1
                         pool[nextKey] = nextVar
-                        que.append(nextKey)
+                        stack.append(nextKey)
+                    model.AddImplication(nextVar, currentVarNot)
 
-                    if currentVar and nextVar:
-                        solver.Add(currentVar + nextVar <= 1)
+            if index > 1:
+                solver = cp_model.CpSolver()
+                coefficient = tuple(candidate[k][0] for k in pool)
+                model.Maximize(cp_model.LinearExpr.ScalProd(pool.values(), coefficient))
 
-            if index > 0:
+                if solver.Solve(model) != cp_model.OPTIMAL:
+                    raise RuntimeError("CP-SAT Solver failed.")
 
-                if index == 1:
-                    yield (next(filter(pool.get, pool)),)
-                else:
-                    objective.SetMaximization()
-                    if solver.Solve() != solver.OPTIMAL:
-                        raise RuntimeError("MIP Solver failed.")
-                    yield (k for k, v in pool.items() if v and v.solution_value() == 1)
-
-                solver.Clear()
-
-            pool.clear()
+                for k, v in pool.items():
+                    if solver.Value(v):
+                        yield k
+                pool.clear()
+            else:
+                yield pool.popitem()[0]
 
 
 class Regen:
