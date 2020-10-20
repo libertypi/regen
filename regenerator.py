@@ -436,28 +436,33 @@ class Optimizer:
         return {k: v for k, v in d.items() if len(v) > 1}
 
     @staticmethod
+    @profile
     def _optimize_group(unvisited: set, candidate: dict):
-        """Groups combinations in the way that each group is internally connected with common
+        """Divide candidates into groups that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum
         length reduction.
 
         - Yield: Optimal keys
         - The input set (1st arg) will be finally emptied.
         """
-
         if len(unvisited) == 1:
             yield unvisited.pop()
             return
 
-        pool = {}
         stack = []
+        pool = {}
         while unvisited:
 
-            model = cp_model.CpModel()
             currentKey = unvisited.pop()
+            if all(map(currentKey.isdisjoint, unvisited)):
+                yield currentKey
+                continue
+
+            model = cp_model.CpModel()
+            solver = cp_model.CpSolver()
             pool[currentKey] = model.NewBoolVar("0")
-            index = 1
             stack.append(currentKey)
+            index = 1
 
             while stack:
                 currentKey = stack.pop()
@@ -477,20 +482,17 @@ class Optimizer:
                         stack.append(nextKey)
                     model.AddImplication(nextVar, currentVarNot)
 
-            if index > 1:
-                solver = cp_model.CpSolver()
-                coefficient = tuple(candidate[k][0] for k in pool)
-                model.Maximize(cp_model.LinearExpr.ScalProd(pool.values(), coefficient))
+            coefficient = tuple(candidate[k][0] for k in pool)
+            model.Maximize(cp_model.LinearExpr.ScalProd(pool.values(), coefficient))
 
-                if solver.Solve(model) != cp_model.OPTIMAL:
-                    raise RuntimeError("CP-SAT Solver failed.")
+            status = solver.Solve(model)
+            if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
+                raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
-                for k, v in pool.items():
-                    if solver.Value(v):
-                        yield k
-                pool.clear()
-            else:
-                yield pool.popitem()[0]
+            for k, v in pool.items():
+                if solver.Value(v):
+                    yield k
+            pool.clear()
 
 
 class Regen:
@@ -501,7 +503,7 @@ class Regen:
         parser = Parser()
         self._tokens = frozenset(chain.from_iterable(map(parser.parse, wordlist)))
         self.wordlist = wordlist
-        self._text = None
+        self._text = self.optimizer = None
         self._regex = [None, None]
 
     def __repr__(self):
@@ -519,9 +521,13 @@ class Regen:
         :omitOuterParen: If True, the outmost parentheses (if any) will be omited.
         """
         if not isinstance(omitOuterParen, bool):
-            raise TypeError("omitOuterParen should be bool.")
+            raise TypeError("omitOuterParen should be a bool.")
+
         if self._regex[omitOuterParen] is None:
-            self._regex[omitOuterParen] = Optimizer().compute(self._tokens, omitOuterParen=omitOuterParen)
+            if not self.optimizer:
+                self.optimizer = Optimizer()
+            self._regex[omitOuterParen] = self.optimizer.compute(self._tokens, omitOuterParen=omitOuterParen)
+
         return self._regex[omitOuterParen]
 
     def verify_result(self):
