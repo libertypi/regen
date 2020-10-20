@@ -436,7 +436,6 @@ class Optimizer:
         return {k: v for k, v in d.items() if len(v) > 1}
 
     @staticmethod
-    @profile
     def _optimize_group(unvisited: set, candidate: dict):
         """Divide candidates into groups that each group is internally connected with common
         members. Then for each group, find the best non-overlapping members to reach the maximum
