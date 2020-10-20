@@ -310,7 +310,7 @@ class Optimizer:
         result = []
         segment = {}
         candidate = {}
-        candidateKeys = set()
+        unvisitCand = set()
         mirror = defaultdict(list)
         frozenUnion = frozenset().union
         prefix = self._prefix
@@ -365,18 +365,18 @@ class Optimizer:
                         candidate[key] = (value, string) if value > 0 else None
 
                     if candidate[key]:
-                        candidateKeys.add(key)
+                        unvisitCand.add(key)
 
                 mirror.clear()
 
-            key = None
-            for key in self._optimize_group(candidateKeys, candidate):
+            if not unvisitCand:
+                break
+            for key in self._optimize_group(unvisitCand, candidate):
                 result.append(candidate[key][1])
                 tokenSet.difference_update(key)
 
-            if not key or not tokenSet:
+            if not tokenSet:
                 break
-
             prefix = self._update_affix(prefix, tokenSet)
             suffix = self._update_affix(suffix, tokenSet)
 
@@ -423,10 +423,10 @@ class Optimizer:
         tmp = {}
         for k, v in d.items():
             if len(v) > 1:
-                n = len(k)
                 key = frozenset(v)
-                if tmp.get(key, (0,))[0] < n:
-                    tmp[key] = n, k
+                val = len(k), k
+                if tmp.setdefault(key, val) < val:
+                    tmp[key] = val
         return {v: d[v] for _, v in tmp.values()}
 
     @staticmethod
@@ -445,23 +445,18 @@ class Optimizer:
         - The input set (1st arg) will be finally emptied.
         """
 
-        if len(unvisited) <= 1:
-            try:
-                yield unvisited.pop()
-            except KeyError:
-                pass
+        if len(unvisited) == 1:
+            yield unvisited.pop()
             return
 
         pool = {}
         stack = []
-
         while unvisited:
 
             model = cp_model.CpModel()
             currentKey = unvisited.pop()
-            currentVar = model.NewBoolVar("0")
+            pool[currentKey] = model.NewBoolVar("0")
             index = 1
-            pool[currentKey] = currentVar
             stack.append(currentKey)
 
             while stack:
