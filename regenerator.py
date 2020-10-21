@@ -31,7 +31,7 @@ __all__ = ["Regen"]
 import re
 from collections import defaultdict
 from functools import lru_cache
-from itertools import chain, filterfalse
+from itertools import chain, compress, filterfalse
 
 from ortools.sat.python import cp_model
 
@@ -99,7 +99,7 @@ class Parser:
                     self._concat_hold()
                     self.result.extend(tuple([*x, char] for x in self.result))
                 else:
-                    hold.append(f"{char}{suffix}")
+                    hold.append(char + suffix)
 
             char = eat()
 
@@ -198,7 +198,7 @@ class Parser:
             if self.optimizer is None:
                 self.optimizer = Optimizer()
             substr = self.optimizer.compute(frozenset(subToken), omitOuterParen=True)
-            hold.append(f"{substr}{suffix}" if self._is_char_block(substr) else f"({substr}){suffix}")
+            hold.append(substr + suffix if self._is_char_block(substr) else f"({substr}){suffix}")
 
     def _concat_hold(self):
         hold = self.hold
@@ -488,9 +488,7 @@ class Optimizer:
             if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
                 raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
-            for k, v in pool.items():
-                if solver.Value(v):
-                    yield k
+            yield from compress(pool, map(solver.Value, pool.values()))
             pool.clear()
 
 
