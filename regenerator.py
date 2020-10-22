@@ -458,7 +458,6 @@ class Optimizer:
                 continue
 
             model = cp_model.CpModel()
-            solver = cp_model.CpSolver()
             pool[currentKey] = model.NewBoolVar("0")
             stack.append(currentKey)
             index = 1
@@ -481,14 +480,19 @@ class Optimizer:
                         stack.append(nextKey)
                     model.AddImplication(nextVar, currentVarNot)
 
-            coefficient = tuple(candidate[k][0] for k in pool)
-            model.Maximize(cp_model.LinearExpr.ScalProd(pool.values(), coefficient))
+            model.Maximize(
+                cp_model.LinearExpr.ScalProd(
+                    pool.values(),
+                    tuple(candidate[k][0] for k in pool),
+                )
+            )
 
+            solver = cp_model.CpSolver()
             status = solver.Solve(model)
             if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
                 raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
-            yield from compress(pool, map(solver.Value, pool.values()))
+            yield from compress(pool, map(solver.BooleanValue, pool.values()))
             pool.clear()
 
 
