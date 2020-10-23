@@ -334,7 +334,7 @@ class Optimizer:
         if quantifier:
             tokenSet.add(())
             tokenSetLength += 1
-        factor = self._get_factor(tokenSetLength)
+        factor = tokenSetLength + 1
 
         while prefix or suffix:
 
@@ -404,15 +404,6 @@ class Optimizer:
     @lru_cache(maxsize=512)
     def _is_word(token: tuple):
         return sum(map(len, token)) > 1
-
-    @staticmethod
-    def _get_factor(i: int) -> int:
-        """Get the multiplication factor for value calculations."""
-        n = 0
-        while i:
-            i //= 10
-            n += 1
-        return 10 ** n
 
     @staticmethod
     def _filter_affix(d: dict) -> dict:
