@@ -4,26 +4,34 @@
 Main module for computing regular expressions from a list of strings/regex.
 
 The libary expand a list of regex to a finite set of words, then generate a new
-regular expression using linear optimization to find the near-shortest combination.
-The computed regex should match exactly the same words as input.
+regular expression using linear optimization to find the near-shortest
+combination. The computed regex should match exactly the same words as input.
 
-The Regen class is intended for external uses, example:
+The Regen class is intended for external uses. Other classes in the libary are
+for internal uses only.
 
-from regenerator import Regen
+### Example:
 
-wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
-regen = Regen(wordlist)
-regen.to_regex() -> '[AB]B[CD]'
+    >>> from regenerator import Regen
 
-wordlist = ['[AB]B[CD]', 'XYZ']
-regen = Regen(wordlist)
-regen.to_text() -> ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
-regen.to_regex() -> '(XYZ|[AB]B[CD])'
-regen.to_regex(omitOuterParen=True) -> 'XYZ|[AB]B[CD]'
+    >>> wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
+    >>> regen = Regen(wordlist)
+    >>> regen.to_regex()
+    ... '[AB]B[CD]'
 
-Other classes in the libary are for internal uses only.
+    >>> wordlist = ['[AB]B[CD]', 'XYZ']
+    >>> regen = Regen(wordlist)
 
-Author: David Pi
+    >>> regen.to_text()
+    ... ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
+
+    >>> regen.to_regex()
+    ... '(XYZ|[AB]B[CD])'
+    
+    >>> regen.to_regex(omitOuterParen=True)
+    ... 'XYZ|[AB]B[CD]'
+
+### Author: `David Pi`
 """
 
 __all__ = ["Regen"]
@@ -407,9 +415,11 @@ class Optimizer:
 
     @staticmethod
     def _filter_affix(d: dict) -> dict:
-        """Keep groups which divide the same words at max common subsequence, and remove single member groups.
+        """Keep groups which divide the same words at max common subsequence,
+        and remove single member groups.
 
-        - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first item will be keeped.
+        - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first
+          item will be keeped.
         """
         tmp = {}
         for k, v in d.items():
@@ -428,9 +438,9 @@ class Optimizer:
 
     @staticmethod
     def _optimize_group(unvisited: set, candidate: dict):
-        """Divide candidates into groups that each group is internally connected with common
-        members. Then for each group, find the best non-overlapping members to reach the maximum
-        length reduction.
+        """Divide candidates into groups that each group is internally connected
+        with common members. Then for each group, find the best non-overlapping
+        members to reach the maximum length reduction.
 
         - Yield: Optimal keys
         - The input set (1st arg) will be finally emptied.
@@ -480,7 +490,7 @@ class Optimizer:
 
             solver = cp_model.CpSolver()
             status = solver.Solve(model)
-            if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
+            if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
             yield from compress(pool, map(solver.BooleanValue, pool.values()))
