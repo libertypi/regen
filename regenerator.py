@@ -490,7 +490,7 @@ class Optimizer:
 
             solver = cp_model.CpSolver()
             status = solver.Solve(model)
-            if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
                 raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
             yield from compress(pool, map(solver.BooleanValue, pool.values()))
