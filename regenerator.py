@@ -10,26 +10,26 @@ combination. The computed regex should match exactly the same words as input.
 The Regen class is intended for external uses. Other classes in the libary are
 for internal uses only.
 
-### Example:
+### Examples:
 
     >>> from regenerator import Regen
 
     >>> wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
     >>> regen = Regen(wordlist)
     >>> regen.to_regex()
-    ... '[AB]B[CD]'
+    '[AB]B[CD]'
 
     >>> wordlist = ['[AB]B[CD]', 'XYZ']
     >>> regen = Regen(wordlist)
 
     >>> regen.to_text()
-    ... ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
+    ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
 
     >>> regen.to_regex()
-    ... '(XYZ|[AB]B[CD])'
+    '(XYZ|[AB]B[CD])'
     
     >>> regen.to_regex(omitOuterParen=True)
-    ... 'XYZ|[AB]B[CD]'
+    'XYZ|[AB]B[CD]'
 
 ### Author: `David Pi`
 """
