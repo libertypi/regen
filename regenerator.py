@@ -40,6 +40,7 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from itertools import chain, compress, filterfalse
+from typing import Iterable
 
 from ortools.sat.python import cp_model
 
@@ -498,18 +499,19 @@ class Optimizer:
 
 
 class Regen:
-    def __init__(self, wordlist: list) -> None:
-        if not isinstance(wordlist, (list, tuple, set)):
+    def __init__(self, wordlist: Iterable[str]) -> None:
+
+        if not isinstance(wordlist, Iterable) or isinstance(wordlist, str):
             raise TypeError("Input should be a list of strings.")
 
         parser = Parser()
         self._tokens = frozenset(chain.from_iterable(map(parser.parse, wordlist)))
-        self.wordlist = wordlist
         self._text = self.optimizer = None
         self._regex = [None, None]
 
     def __repr__(self):
-        return f"{self.__class__.__name__}({self.wordlist})"
+        inner = ", ".join(f"'{w}'" for w in self.to_text())
+        return f"{self.__class__.__name__}([{inner}])"
 
     def to_text(self):
         """Extract the regular expressions to a list of corresponding words."""
@@ -541,8 +543,7 @@ class Regen:
         if self._tokens != Regen([regex])._tokens:
             raise ValueError("Extraction from computed regex is different from that of original wordlist.")
 
-        pattern = re.compile(regex)
-        for i in filterfalse(pattern.fullmatch, frozenset(chain(self.wordlist, self.to_text()))):
+        for i in filterfalse(re.compile(regex).fullmatch, self.to_text()):
             if _specials.isdisjoint(i):
                 raise ValueError(f"Computed regex does not fully match this word: '{i}'")
 
