@@ -386,7 +386,7 @@ class Analyzer:
         sep = "-" * 80 + "\n"
 
         av_matcher = self.av_matcher
-        prefix_searcher = re.compile(r"\b[0-9]*([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]?)?\b").search
+        prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]?)?\b").search
         word_finder = re.compile(r"(?!\d+\b)\w{3,}").findall
 
         flat_counter = defaultdict(set)
