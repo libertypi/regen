@@ -7,6 +7,7 @@ cwhdbd
 cz
 czbd
 gm
+gs
 isi
 kg
 mcb3d

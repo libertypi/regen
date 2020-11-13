@@ -44,7 +44,7 @@ class MteamScraper:
 
         if not self._fetch:
             path = None
-            matcher = re.compile("[0-9]+\.txt").fullmatch
+            matcher = re.compile(r"[0-9]+\.txt").fullmatch
             for path in subdir.iterdir():
                 if matcher(path.name):
                     yield path
@@ -387,7 +387,7 @@ class Analyzer:
 
         av_matcher = self.av_matcher
         prefix_searcher = re.compile(r"\b[0-9]*([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]?)?\b").search
-        word_finder = re.compile(r"\w{3,}").findall
+        word_finder = re.compile(r"(?!\d+\b)\w{3,}").findall
 
         flat_counter = defaultdict(set)
         prefix_counter = Counter()
@@ -455,9 +455,8 @@ class Analyzer:
         with ProcessPoolExecutor(max_workers=None) as ex:
 
             paths = self.scraper.run(page, lo, hi, is_av=False)
-            pool = as_completed(ex.submit(self._match_non_av, p, matcher) for p in paths)
 
-            for ft in pool:
+            for ft in as_completed(ex.submit(self._match_non_av, p, matcher) for p in paths):
 
                 for m in ft.result():
                     try:
