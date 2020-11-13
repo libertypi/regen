@@ -6,13 +6,13 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from configparser import ConfigParser
 from itertools import chain, filterfalse
 from operator import itemgetter
-from os import chdir
+from os import chdir, cpu_count
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, List, Set, TextIO, Tuple
+from typing import Callable, Iterable, Iterator, List, Set, Tuple
 from urllib.parse import urljoin
 
 import requests
@@ -36,26 +36,24 @@ class MteamScraper:
         self._cache_dir = cache_dir
         self._fetch = fetch
 
-    def run(self, page: str, lo: int, hi: int, is_av: bool, cjk_only: bool = False) -> Iterator[TextIO]:
+    def run(self, page: str, lo: int, hi: int, is_av: bool, cjk_only: bool = False) -> Iterator[Path]:
 
         subdir = self._cache_dir.joinpath("av" if is_av else "non_av")
         if not subdir.exists():
             subdir.mkdir(parents=True)
 
         if not self._fetch:
-            f = None
+            path = None
             matcher = re.compile("[0-9]+\.txt").fullmatch
-
             for path in subdir.iterdir():
                 if matcher(path.name):
-                    with path.open("r", encoding="utf-8") as f:
-                        yield f
-            if f is not None:
+                    yield path
+            if path is not None:
                 return
 
         page = self.DOMAIN + page
         self._id_searcher = re.compile(r"\bid=(?P<id>[0-9]+)").search
-        self._tr_show = re.compile(r"^\s+(.+?) \([^)]+\)$", flags=re.MULTILINE).findall
+        self._tr_show = re.compile(r"^\s+(.+?) \([^)]+\)$", flags=re.M).findall
 
         if cjk_only:
             parser = self._make_cjk_parser()
@@ -66,21 +64,20 @@ class MteamScraper:
                 '//a[contains(@href, "download.php")]/@href'
             )
 
-        with ThreadPoolExecutor(max_workers=None) as l_ex, ThreadPoolExecutor(max_workers=None) as t_ex:
-            for l_ft in as_completed(l_ex.submit(self._get_link, page, i, parser) for i in range(lo, hi + 1)):
-                for t_ft in as_completed(t_ex.submit(self._fetch_torrent, i, subdir) for i in l_ft.result()):
-                    try:
-                        with t_ft.result().open("r", encoding="utf-8") as f:
-                            yield f
-                    except AttributeError:
-                        pass
+        max_workers = min(32, cpu_count() + 4)
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            while lo < hi:
+                stop = min(lo + max_workers, hi)
+                print(f"Scanning mteam: {lo} - {stop}")
+
+                for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, stop)):
+                    paths = as_completed(ex.submit(self._fetch_torrent, i, subdir) for i in ft.result())
+                    yield from filter(None, map(Future.result, paths))
+                lo = stop
 
     @staticmethod
     def _make_cjk_parser():
-
-        table_xp = etree.XPath(
-            '//*[@id="form_torrent"]/table[@class="torrents"]//*[@class="torrenttr"]/table[@class="torrentname"]'
-        )
+        table_path = './/form[@id="form_torrent"]//table[@class="torrentname"]'
         title_xp = etree.XPath('(.//a[contains(@href, "details.php")]/@title)[1]')
         link_xp = etree.XPath('(.//a[contains(@href, "download.php")]/@href)[1]')
         cjk = (
@@ -94,9 +91,9 @@ class MteamScraper:
             (131072, 196607),
         )
 
-        def _parser(tree) -> List[str]:
+        def _parser(tree: html.HtmlElement) -> List[str]:
             result = []
-            for table in table_xp(tree):
+            for table in tree.iterfind(table_path):
                 try:
                     if any(i <= c <= j for c in map(ord, title_xp(table)[0]) for i, j in cjk):
                         result.append(link_xp(table)[0])
@@ -108,7 +105,7 @@ class MteamScraper:
 
     @staticmethod
     def _get_link(page: str, n: int, parser: Callable) -> List[str]:
-        print("Fetching page:", n)
+
         for retry in range(3):
             try:
                 r = session.get(page, timeout=(7, 27), params={"page": n})
@@ -270,15 +267,15 @@ class JavREBuilder:
 
     def _scrape_mteam(self) -> Iterator[Tuple[str, str]]:
 
-        print(f"Scanning MTeam...")
-
         matcher = re.compile(
             r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[0-9]?)?\b.*\.(?:mp4|wmv|avi|iso)$",
             flags=re.MULTILINE,
         ).search
 
-        for m in filter(None, map(matcher, chain.from_iterable(self.mteam_scrape))):
-            yield m.group(1, 2)
+        for path in self.mteam_scrape:
+            with path.open("r", encoding="utf-8") as f:
+                for m in filter(None, map(matcher, f)):
+                    yield m.group(1, 2)
 
     def _scrape_javbus(self) -> Iterator[str]:
 
@@ -286,36 +283,37 @@ class JavREBuilder:
         xpath = etree.XPath('//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()')
         step = 500
 
-        for base in ("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"):
-            idx = 1
-            print(f"  /{base}: ", end="", flush=True)
-            with ThreadPoolExecutor(max_workers=None) as ex:
+        with ThreadPoolExecutor(max_workers=None) as ex:
+            for base in ("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"):
+                idx = 1
+                print(f"  /{base}: ", end="", flush=True)
+
                 while True:
                     print(f"{idx}:{idx+step}...", end="", flush=True)
                     args = ((f"https://www.javbus.com/{base}/{i}", xpath) for i in range(idx, idx + step))
                     try:
-                        yield from chain.from_iterable(ex.map(self._scrap_jav, args))
+                        yield from chain.from_iterable(ex.map(self._scrap_page, args))
                     except LastPageReached:
                         break
                     idx += step
-            print()
+                print()
 
     def _scrape_javdb(self) -> Iterator[str]:
 
-        limit = 80
         print(f"Scanning javdb...")
         xpath = etree.XPath('//*[@id="videos"]//a/div[@class="uid"]/text()')
+        args = ((f"https://javdb.com/{p}?page={i}", xpath) for p in ("uncensored", "") for i in range(1, 81))
 
-        for base in ("https://javdb.com/uncensored", "https://javdb.com/"):
-            with ThreadPoolExecutor(max_workers=3) as ex:
-                args = ((f"{base}?page={i}", xpath) for i in range(1, limit + 1))
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            for future in as_completed(ex.submit(self._scrap_page, i) for i in args):
                 try:
-                    yield from chain.from_iterable(ex.map(self._scrap_jav, args))
+                    for i in future.result():
+                        yield i
                 except LastPageReached:
                     pass
 
     @staticmethod
-    def _scrap_jav(args: Tuple) -> List[str]:
+    def _scrap_page(args: Tuple[str, Callable]) -> List[str]:
 
         url, xpath = args
 
@@ -382,8 +380,8 @@ class Analyzer:
         print("Matching test begins...")
 
         page = "adult.php"
-        unmatched_file = self.report_dir.joinpath("unmatch_raw.txt")
-        freq_file = self.report_dir.joinpath("unmatch_frequency.txt")
+        unmatch_raw = self.report_dir.joinpath("unmatch_raw.txt")
+        unmatch_freq = self.report_dir.joinpath("unmatch_frequency.txt")
         total = unmatched = 0
         sep = "-" * 80 + "\n"
 
@@ -394,28 +392,25 @@ class Analyzer:
         flat_counter = defaultdict(set)
         prefix_counter = Counter()
         word_counter = Counter()
-        videos = []
         tmp = set()
 
-        with unmatched_file.open("w", encoding="utf-8") as f:
+        with ProcessPoolExecutor(max_workers=None) as ex, unmatch_raw.open("w", encoding="utf-8") as f:
 
-            for t in self.scraper.run(page, lo, hi, is_av=True):
+            paths = self.scraper.run(page, lo, hi, is_av=True)
+            futures = as_completed(ex.submit(self._match_av, p, av_matcher) for p in paths)
+
+            for video in map(Future.result, futures):
 
                 total += 1
-                if any(map(av_matcher, t)):
-                    continue
-
-                t.seek(0)
-                videos.extend(filter(is_video, t))
-                if not videos:
+                if not video:
                     continue
 
                 unmatched += 1
                 f.write(sep)
-                f.writelines(videos)
+                f.writelines(video)
                 f.write("\n")
 
-                for m in filter(None, map(prefix_searcher, videos)):
+                for m in filter(None, map(prefix_searcher, video)):
                     prefix = m.group(1)
                     flat_counter[prefix].add(m.group())
                     tmp.add(prefix)
@@ -423,10 +418,9 @@ class Analyzer:
                 prefix_counter.update(tmp)
                 tmp.clear()
 
-                tmp.update(chain.from_iterable(map(word_finder, videos)))
+                tmp.update(chain.from_iterable(map(word_finder, video)))
                 word_counter.update(tmp)
                 tmp.clear()
-                videos.clear()
 
             f.write(f"{sep}Total: {total}. Unmatched: {unmatched}.\n")
 
@@ -434,8 +428,7 @@ class Analyzer:
         words = [(v, k) for k, v in word_counter.items() if v >= 3]
         prefixes.sort(reverse=True)
         words.sort(reverse=True)
-
-        with freq_file.open("w", encoding="utf-8") as f:
+        with unmatch_freq.open("w", encoding="utf-8") as f:
             f.write("Potential ID Prefixes:\n\n")
             f.write("{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format("uniq", "occur", "word", "strings", ""))
             f.writelines(f"{i:6d}  {j:6d}  {k:15}  {s}\n" for i, j, k, s in prefixes)
@@ -444,7 +437,7 @@ class Analyzer:
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
-        print(f"Done. Results saved to:\n{unmatched_file}\n{freq_file}")
+        print(f"Done. Results saved to:\n{unmatch_raw}\n{unmatch_freq}")
 
     def analyze_non_av(self, lo: int, hi: int):
 
@@ -453,27 +446,31 @@ class Analyzer:
         page = "torrents.php"
         mismatched_file = self.report_dir.joinpath("mismatch_frequency.txt")
         word_searcher = re.compile(r"[a-z]+").search
-        av_matcher = self.av_matcher
+        matcher = self.av_matcher
 
         flat_counter = defaultdict(list)
         torrent_counter = Counter()
         tmp = set()
 
-        for f in self.scraper.run(page, lo, hi, is_av=False):
+        with ProcessPoolExecutor(max_workers=None) as ex:
 
-            for m in filter(None, map(av_matcher, f)):
-                m = m.group()
-                try:
-                    word = word_searcher(m).group()
-                except AttributeError:
-                    pass
-                else:
-                    flat_counter[word].append(m)
-                    tmp.add(word)
+            paths = self.scraper.run(page, lo, hi, is_av=False)
+            pool = as_completed(ex.submit(self._match_non_av, p, matcher) for p in paths)
 
-            if tmp:
-                torrent_counter.update(tmp)
-                tmp.clear()
+            for ft in pool:
+
+                for m in ft.result():
+                    try:
+                        word = word_searcher(m).group()
+                    except AttributeError:
+                        pass
+                    else:
+                        flat_counter[word].append(m)
+                        tmp.add(word)
+
+                if tmp:
+                    torrent_counter.update(tmp)
+                    tmp.clear()
 
         result = [(torrent_counter[k], len(v), k, set(v)) for k, v in flat_counter.items()]
         result.sort(reverse=True)
@@ -483,6 +480,18 @@ class Analyzer:
             f.writelines(f"{i:6d}  {j:6d}  {k:15}  {s}\n" for i, j, k, s in result)
 
         print(f"Done. Result saved to: {mismatched_file}")
+
+    @staticmethod
+    def _match_av(path: Path, matcher: Callable):
+        with path.open("r", encoding="utf-8") as f:
+            if not any(map(matcher, f)):
+                f.seek(0)
+                return tuple(filter(is_video, f))
+
+    @staticmethod
+    def _match_non_av(path: Path, matcher: Callable):
+        with path.open("r", encoding="utf-8") as f:
+            return tuple(map(re.Match.group, filter(None, map(matcher, f))))
 
 
 def is_video(string: str):
