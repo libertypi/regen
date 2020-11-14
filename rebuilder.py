@@ -83,7 +83,7 @@ class MteamScraper:
         title_xp = etree.XPath('(.//a[contains(@href, "details.php")]/@title)[1]')
         link_xp = etree.XPath('(.//a[contains(@href, "download.php")]/@href)[1]')
 
-        cjk_range = 0
+        cjk = 0
         for i, j in (
             (4352, 4607),
             (11904, 42191),
@@ -94,13 +94,13 @@ class MteamScraper:
             (65381, 65500),
             (131072, 196607),
         ):
-            cjk_range |= (1 << (j + 1)) - (1 << i)
+            cjk |= (1 << j + 1) - (1 << i)
 
         def _parser(tree: html.HtmlElement) -> List[str]:
             result = []
             for table in tree.iterfind(table_path):
                 try:
-                    if any(cjk_range & (1 << c) for c in map(ord, title_xp(table)[0])):
+                    if any(1 << ord(c) & cjk for c in title_xp(table)[0]):
                         result.append(link_xp(table)[0])
                 except IndexError:
                     pass
