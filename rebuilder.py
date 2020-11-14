@@ -52,7 +52,7 @@ class MteamScraper:
                 return
 
         page = urljoin(self.DOMAIN, page)
-        id_searcher = re.compile(r"\bid=(?P<id>[0-9]+)").search
+        id_searcher = re.compile(r"\bid=([0-9]+)").search
 
         if cjk_only:
             parser = self._make_cjk_parser()
@@ -68,7 +68,7 @@ class MteamScraper:
             for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, hi)):
                 for link in ft.result():
                     try:
-                        path = subdir.joinpath(id_searcher(link)["id"] + ".txt")
+                        path = subdir.joinpath(id_searcher(link).expand(r"\1.txt"))
                     except TypeError:
                         continue
                     if path.exists():
@@ -416,8 +416,8 @@ class Analyzer:
                 f.write("\n")
 
                 for m in filter(None, map(prefix_searcher, video)):
-                    prefix = m.group(1)
-                    flat_counter[prefix].add(m.group())
+                    prefix = m[1]
+                    flat_counter[prefix].add(m[0])
                     tmp.add(prefix)
 
                 prefix_counter.update(tmp)
@@ -470,8 +470,8 @@ class Analyzer:
                 total += 1
                 for m in ft.result():
                     try:
-                        word = word_searcher(m).group()
-                    except AttributeError:
+                        word = word_searcher(m)[0]
+                    except TypeError:
                         pass
                     else:
                         flat_counter[word].append(m)
@@ -495,24 +495,20 @@ class Analyzer:
         print(f"Result saved to: {mismatched_file}")
 
     @staticmethod
-    def _match_av(path: Path, matcher: Callable):
+    def _match_av(path: Path, matcher: Callable) -> Tuple[str]:
         with path.open("r", encoding="utf-8") as f:
             if not any(map(matcher, f)):
                 f.seek(0)
-                return tuple(filter(is_video, f))
+                return tuple(i for i in f if i.endswith((".mp4", ".wmv", ".avi", ".iso", ".m2ts"), None, -1))
 
     @staticmethod
-    def _match_non_av(path: Path, matcher: Callable):
+    def _match_non_av(path: Path, matcher: Callable) -> Tuple[str]:
         with path.open("r", encoding="utf-8") as f:
-            return tuple(map(re.Match.group, filter(None, map(matcher, f))))
+            return tuple(m[0] for m in map(matcher, f) if m)
 
     @staticmethod
     def _get_stat(name: str, total: int, n: int):
         return f"Total: {total}. {name}: {n}. Percentage: {n / total * 100:.2f}%."
-
-
-def is_video(string: str):
-    return string.rstrip().endswith((".mp4", ".wmv", ".avi", ".iso", ".m2ts"))
 
 
 def parse_config(configfile: str):
