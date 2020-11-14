@@ -12,6 +12,7 @@ from itertools import chain, filterfalse
 from operator import itemgetter
 from os import chdir
 from pathlib import Path
+from time import sleep
 from typing import Callable, Iterable, Iterator, List, Set, Tuple
 from urllib.parse import urljoin
 
@@ -118,6 +119,7 @@ class MteamScraper:
             except requests.RequestException:
                 if retry == 2:
                     raise
+                sleep(1)
             else:
                 return parser(html.fromstring(r.content))
 
@@ -130,7 +132,7 @@ class MteamScraper:
             try:
                 content = session.get(link, timeout=(7, 27)).content
             except (requests.RequestException, AttributeError):
-                pass
+                sleep(1)
             else:
                 break
         else:
@@ -333,6 +335,7 @@ class JavREBuilder:
                 pass
             else:
                 return xpath(html.fromstring(res.content))
+            sleep(1)
 
         raise requests.RequestException(f"Connection error: {url}")
 
@@ -348,6 +351,7 @@ class JavREBuilder:
             except requests.RequestException:
                 if retry == 2:
                     raise
+                sleep(1)
 
     @staticmethod
     def _get_regex(wordlist: List[str], name: str, omitOuterParen: bool) -> str:
@@ -576,7 +580,7 @@ def parse_arguments():
         action="store",
         type=int,
         help="range of mteam pages for testing, 1 or 2 integers",
-        default=(0, 20),
+        default=(0, 100),
     )
 
     args = parser.parse_args()
