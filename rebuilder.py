@@ -10,7 +10,7 @@ from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, 
 from configparser import ConfigParser
 from itertools import chain, filterfalse
 from operator import itemgetter
-from os import chdir, cpu_count
+from os import chdir
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, List, Set, Tuple
 from urllib.parse import urljoin
@@ -51,9 +51,8 @@ class MteamScraper:
             if path is not None:
                 return
 
-        page = self.DOMAIN + page
-        self._id_searcher = re.compile(r"\bid=(?P<id>[0-9]+)").search
-        self._tr_show = re.compile(r"^\s+(.+?) \([^)]+\)$", flags=re.M).findall
+        page = urljoin(self.DOMAIN, page)
+        id_searcher = re.compile(r"\bid=(?P<id>[0-9]+)").search
 
         if cjk_only:
             parser = self._make_cjk_parser()
@@ -64,23 +63,28 @@ class MteamScraper:
                 '//a[contains(@href, "download.php")]/@href'
             )
 
-        max_workers = min(32, cpu_count() + 4)
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            while lo < hi:
-                stop = min(lo + max_workers, hi)
-                print(f"Scanning mteam: {lo} - {stop}")
-
-                for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, stop)):
-                    paths = as_completed(ex.submit(self._fetch_torrent, i, subdir) for i in ft.result())
-                    yield from filter(None, map(Future.result, paths))
-                lo = stop
+        pool = []
+        with ThreadPoolExecutor(max_workers=None) as ex:
+            for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, hi)):
+                for link in ft.result():
+                    try:
+                        path = subdir.joinpath(id_searcher(link)["id"] + ".txt")
+                    except TypeError:
+                        continue
+                    if path.exists():
+                        yield path
+                    else:
+                        pool.append(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
+            yield from filter(None, map(Future.result, as_completed(pool)))
 
     @staticmethod
     def _make_cjk_parser():
         table_path = './/form[@id="form_torrent"]//table[@class="torrentname"]'
         title_xp = etree.XPath('(.//a[contains(@href, "details.php")]/@title)[1]')
         link_xp = etree.XPath('(.//a[contains(@href, "download.php")]/@href)[1]')
-        cjk = (
+
+        cjk_range = 0
+        for i, j in (
             (4352, 4607),
             (11904, 42191),
             (43072, 43135),
@@ -89,13 +93,14 @@ class MteamScraper:
             (65072, 65103),
             (65381, 65500),
             (131072, 196607),
-        )
+        ):
+            cjk_range |= (1 << (j + 1)) - (1 << i)
 
         def _parser(tree: html.HtmlElement) -> List[str]:
             result = []
             for table in tree.iterfind(table_path):
                 try:
-                    if any(i <= c <= j for c in map(ord, title_xp(table)[0]) for i, j in cjk):
+                    if any(cjk_range & (1 << c) for c in map(ord, title_xp(table)[0])):
                         result.append(link_xp(table)[0])
                 except IndexError:
                     pass
@@ -116,51 +121,50 @@ class MteamScraper:
             else:
                 return parser(html.fromstring(r.content))
 
-    def _fetch_torrent(self, link: str, subdir: Path) -> Path:
+    @staticmethod
+    def _download(link: str, path: Path) -> Path:
 
-        file = subdir.joinpath(self._id_searcher(link)["id"] + ".txt")
+        print("Downloading:", link)
 
-        if not file.exists():
-            print("Fetching torrent:", link)
-
-            for _ in range(3):
-                try:
-                    content = session.get(urljoin(self.DOMAIN, link), timeout=(7, 27)).content
-                except (requests.RequestException, AttributeError):
-                    pass
-                else:
-                    break
+        for _ in range(3):
+            try:
+                content = session.get(link, timeout=(7, 27)).content
+            except (requests.RequestException, AttributeError):
+                pass
             else:
-                print(f"Downloading torrent failed: {link}")
-                return
+                break
+        else:
+            print(f"Downloading torrent failed: {link}")
+            return
+
+        try:
+            filelist = Torrent.from_string(content).files
+            with path.open("w", encoding="utf-8") as f:
+                f.writelines(i[0].lower() + "\n" for i in filelist)
+
+        except (TorrentoolException, OSError, TypeError):
+
+            torrent_file = path.with_suffix(".torrent")
+            spliter = re.compile(r"^\s+(.+?) \([^)]+\)$", flags=re.M)
 
             try:
-                filelist = Torrent.from_string(content).files
-                with open(file, "w", encoding="utf-8") as f:
-                    f.writelines(i[0].lower() + "\n" for i in filelist)
+                torrent_file.write_bytes(content)
+                filelist = subprocess.check_output(("transmission-show", torrent_file), encoding="utf-8")
+                filelist = spliter.findall(filelist, filelist.index("\n\nFILES\n\n"))
+                if not filelist:
+                    raise ValueError
 
-            except (TorrentoolException, OSError, TypeError):
+                with path.open("w", encoding="utf-8") as f:
+                    f.writelines(i.lower() + "\n" for i in filelist)
 
-                torrent_file = file.with_suffix(".torrent")
+            except (subprocess.CalledProcessError, ValueError, OSError):
+                print(f'Parsing torrent error: "{link}"')
+                return
 
-                try:
-                    torrent_file.write_bytes(content)
-                    filelist = subprocess.check_output(("transmission-show", torrent_file), encoding="utf-8")
-                    filelist = self._tr_show(filelist, filelist.index("\n\nFILES\n\n"))
-                    if not filelist:
-                        raise ValueError
+            finally:
+                torrent_file.unlink(missing_ok=True)
 
-                    with open(file, "w", encoding="utf-8") as f:
-                        f.writelines(i.lower() + "\n" for i in filelist)
-
-                except (subprocess.CalledProcessError, ValueError, OSError):
-                    print(f'Parsing torrent error: "{link}"')
-                    return
-
-                finally:
-                    torrent_file.unlink(missing_ok=True)
-
-        return file
+        return path
 
 
 class JavREBuilder:
@@ -267,6 +271,7 @@ class JavREBuilder:
 
     def _scrape_mteam(self) -> Iterator[Tuple[str, str]]:
 
+        print("Scanning mteam...")
         matcher = re.compile(
             r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[0-9]?)?\b.*\.(?:mp4|wmv|avi|iso)$",
             flags=re.MULTILINE,
@@ -422,13 +427,15 @@ class Analyzer:
                 word_counter.update(tmp)
                 tmp.clear()
 
-            f.write(f"{sep}Total: {total}. Unmatched: {unmatched}.\n")
-
         prefixes = [(i, len(v), k, v) for k, v in flat_counter.items() if (i := prefix_counter[k]) >= 3]
         words = [(v, k) for k, v in word_counter.items() if v >= 3]
         prefixes.sort(reverse=True)
         words.sort(reverse=True)
+        stat = self._get_stat("Matched", total, total - unmatched)
+
         with unmatch_freq.open("w", encoding="utf-8") as f:
+            f.write(stat + "\n\n")
+
             f.write("Potential ID Prefixes:\n\n")
             f.write("{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format("uniq", "occur", "word", "strings", ""))
             f.writelines(f"{i:6d}  {j:6d}  {k:15}  {s}\n" for i, j, k, s in prefixes)
@@ -437,7 +444,8 @@ class Analyzer:
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
-        print(f"Done. Results saved to:\n{unmatch_raw}\n{unmatch_freq}")
+        print(stat)
+        print(f"Result saved to: {unmatch_freq}")
 
     def analyze_non_av(self, lo: int, hi: int):
 
@@ -447,6 +455,7 @@ class Analyzer:
         mismatched_file = self.report_dir.joinpath("mismatch_frequency.txt")
         word_searcher = re.compile(r"[a-z]+").search
         matcher = self.av_matcher
+        total = mismatched = 0
 
         flat_counter = defaultdict(list)
         torrent_counter = Counter()
@@ -458,6 +467,7 @@ class Analyzer:
 
             for ft in as_completed(ex.submit(self._match_non_av, p, matcher) for p in paths):
 
+                total += 1
                 for m in ft.result():
                     try:
                         word = word_searcher(m).group()
@@ -468,17 +478,21 @@ class Analyzer:
                         tmp.add(word)
 
                 if tmp:
+                    mismatched += 1
                     torrent_counter.update(tmp)
                     tmp.clear()
 
         result = [(torrent_counter[k], len(v), k, set(v)) for k, v in flat_counter.items()]
         result.sort(reverse=True)
+        stat = self._get_stat("Mismatched", total, mismatched)
 
         with mismatched_file.open("w", encoding="utf-8") as f:
+            f.write(stat + "\n\n")
             f.write("{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format("uniq", "occur", "word", "strings", ""))
             f.writelines(f"{i:6d}  {j:6d}  {k:15}  {s}\n" for i, j, k, s in result)
 
-        print(f"Done. Result saved to: {mismatched_file}")
+        print(stat)
+        print(f"Result saved to: {mismatched_file}")
 
     @staticmethod
     def _match_av(path: Path, matcher: Callable):
@@ -491,6 +505,10 @@ class Analyzer:
     def _match_non_av(path: Path, matcher: Callable):
         with path.open("r", encoding="utf-8") as f:
             return tuple(map(re.Match.group, filter(None, map(matcher, f))))
+
+    @staticmethod
+    def _get_stat(name: str, total: int, n: int):
+        return f"Total: {total}. {name}: {n}. Percentage: {n / total * 100:.2f}%."
 
 
 def is_video(string: str):

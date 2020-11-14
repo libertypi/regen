@@ -71,7 +71,6 @@ ambi
 ambs
 ambx
 amc
-amd
 amg
 amgz
 amoz
@@ -80,7 +79,6 @@ amrs
 amz
 anb
 anci
-and
 angr
 anhd
 anks
@@ -563,7 +561,6 @@ ditr
 div
 divas
 divs
-diy
 djdk
 dje
 djjj
@@ -700,6 +697,7 @@ duib
 dup
 dusa
 duvv
+dv
 dvaa
 dvaj
 dvcl
@@ -789,6 +787,7 @@ endx
 enfd
 enjk
 enki
+eq
 erh
 erod
 eroteen
@@ -1177,6 +1176,7 @@ hunta
 hunvr
 husr
 hvg
+hvr
 hwaz
 hwd
 hxad
@@ -1520,6 +1520,7 @@ kuni
 kunk
 kura
 kusr
+kv
 kwbd
 kwe
 kwpo
@@ -1740,6 +1741,7 @@ mias
 miav
 mibb
 mibd
+mibm
 mica
 midd
 mide
@@ -1752,7 +1754,6 @@ miid
 mild
 milf
 milk
-mille
 milv
 mimk
 mimu
@@ -2965,6 +2966,7 @@ vsv
 vtf
 vvvd
 vvvr
+wa
 waaa
 wab
 waka

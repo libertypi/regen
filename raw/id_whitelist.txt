@@ -6,10 +6,13 @@ cw3d2dbd
 cwhdbd
 cz
 czbd
+dv
+eq
 gm
 gs
 isi
 kg
+kv
 mcb3d
 mcb3dbd
 mk3d2d
@@ -29,5 +32,6 @@ sw
 t28
 tap
 tushy
+wa
 x1x
 xv
