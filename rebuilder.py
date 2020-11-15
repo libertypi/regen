@@ -62,9 +62,7 @@ class MteamScraper:
             parser = self._make_cjk_parser()
         else:
             parser = etree.XPath(
-                '//*[@id="form_torrent"]/table[@class="torrents"]'
-                '//*[@class="torrenttr"]/table[@class="torrentname"]'
-                '//a[contains(@href, "download.php")]/@href'
+                '//form[@id="form_torrent"]//table[@class="torrentname"]//a[contains(@href, "download.php")]/@href'
             )
 
         pool = []
@@ -73,7 +71,7 @@ class MteamScraper:
                 for link in ft.result():
                     try:
                         path = subdir.joinpath(id_searcher(link).expand(r"\1.txt"))
-                    except TypeError:
+                    except AttributeError:
                         continue
                     if path.exists():
                         yield path
@@ -150,7 +148,7 @@ class MteamScraper:
         except (TorrentoolException, OSError, TypeError):
 
             torrent_file = path.with_suffix(".torrent")
-            spliter = re.compile(r"^\s+(.+?) \([^)]+\)$", flags=re.M)
+            spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
 
             try:
                 torrent_file.write_bytes(content)
@@ -260,25 +258,27 @@ class JavREBuilder:
 
     def _web_scrape(self) -> Set[str]:
 
-        uniq_id = set(self._scrape_mteam())
-        uniq_id.update(self._normalize_id(chain(self._scrape_javbus(), self._scrape_javdb(), self._scrape_github())))
+        result = set(self._scrape_mteam())
+        for func in self._scrape_javbus, self._scrape_javdb, self._scrape_github:
+            result.update(self._normalize_id(func()))
 
-        prefix_counter = Counter(map(itemgetter(0), uniq_id))
-        final = {k for k, v in prefix_counter.items() if v >= _THRESH}
+        uniq_id = len(result)
+        prefix_counter = Counter(map(itemgetter(0), result))
+        result = {k for k, v in prefix_counter.items() if v >= _THRESH}
 
-        print(f"Uniq ID: {len(uniq_id)}. Uniq prefix: {len(prefix_counter)}. Final: {len(final)}.")
-        return final
+        print(f"Uniq ID: {uniq_id}. Uniq prefix: {len(prefix_counter)}. Final: {len(result)}.")
+        return result
 
     @staticmethod
     def _normalize_id(wordlist: Iterable[str]) -> Iterator[Tuple[str, str]]:
-
-        matcher = re.compile(r"\s*([a-z]{3,7})[ _-]?0*([0-9]{2,6})\s*").fullmatch
-        for m in filter(None, map(matcher, map(str.lower, wordlist))):
+        matcher = re.compile(r"\s*([a-z]{3,7})[ _-]?0*([0-9]{2,6})\s*")
+        for m in filter(None, map(matcher.fullmatch, map(str.lower, wordlist))):
             yield m.group(1, 2)
 
     def _scrape_mteam(self) -> Iterator[Tuple[str, str]]:
 
         print("Scanning mteam...")
+
         matcher = re.compile(
             r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[1-9]?)?\b.*\.(?:mp4|wmv|avi|iso)$",
             flags=re.MULTILINE,
