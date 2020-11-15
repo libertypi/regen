@@ -12,6 +12,7 @@ from itertools import chain, filterfalse
 from operator import itemgetter
 from os import chdir
 from pathlib import Path
+from reprlib import repr as _repr
 from time import sleep
 from typing import Callable, Iterable, Iterator, List, Set, Tuple
 from urllib.parse import urljoin
@@ -141,7 +142,7 @@ class MteamScraper:
 
         try:
             filelist = Torrent.from_string(content).files
-            with path.open("w", encoding="utf-8") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.writelines(i[0].lower() + "\n" for i in filelist)
 
         except (TorrentoolException, OSError, TypeError):
@@ -156,7 +157,7 @@ class MteamScraper:
                 if not filelist:
                     raise ValueError
 
-                with path.open("w", encoding="utf-8") as f:
+                with open(path, "w", encoding="utf-8") as f:
                     f.writelines(i.lower() + "\n" for i in filelist)
 
             except (subprocess.CalledProcessError, ValueError, OSError):
@@ -219,19 +220,20 @@ class JavREBuilder:
     def _update_file(file: Path, stragety: Callable[[Iterable[str]], Iterable[str]]) -> List[str]:
 
         try:
-            f = file.open(mode="r+", encoding="utf-8")
-            old_list = f.read().splitlines()
+            with file.open("r+", encoding="utf-8") as f:
+                old_list = f.read().splitlines()
+                result = sorted(stragety(old_list))
+                if old_list != result:
+                    f.seek(0)
+                    f.writelines(i + "\n" for i in result)
+                    f.truncate()
+                    print(f"{file} updated.")
         except FileNotFoundError:
-            f = file.open(mode="w", encoding="utf-8")
-            old_list = []
-        finally:
-            result = sorted(stragety(old_list))
-            if old_list != result:
-                f.seek(0)
+            result = sorted(stragety([]))
+            with file.open(mode="w", encoding="utf-8") as f:
                 f.writelines(i + "\n" for i in result)
-                f.truncate()
-                print(f"{file} updated.")
-            f.close()
+            print(f"{file} created.")
+
         return result
 
     def _prefix_strategy(self, old_list: Iterable[str]) -> Iterator[str]:
@@ -246,8 +248,9 @@ class JavREBuilder:
 
         return filterfalse(self._kw_filter, result)
 
-    def _extract_strategy(self, old_list: Iterable[str]) -> Iterator[str]:
-        return Regen(self._filter_strategy(old_list)).to_text()
+    @classmethod
+    def _extract_strategy(cls, old_list: Iterable[str]) -> Iterator[str]:
+        return Regen(cls._filter_strategy(old_list)).to_text()
 
     @staticmethod
     def _filter_strategy(wordlist: Iterable[str]) -> Set[str]:
@@ -275,16 +278,17 @@ class JavREBuilder:
 
         print("Scanning mteam...")
         matcher = re.compile(
-            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[0-9]?)?\b.*\.(?:mp4|wmv|avi|iso)$",
+            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[1-9]?)?\b.*\.(?:mp4|wmv|avi|iso)$",
             flags=re.MULTILINE,
         ).search
 
         for path in self.mteam_scrape:
-            with path.open("r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 for m in filter(None, map(matcher, f)):
                     yield m.group(1, 2)
 
-    def _scrape_javbus(self) -> Iterator[str]:
+    @classmethod
+    def _scrape_javbus(cls) -> Iterator[str]:
 
         print("Scanning javbus...")
         xpath = etree.XPath('//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()')
@@ -299,20 +303,21 @@ class JavREBuilder:
                     print(f"{idx}:{idx+step}...", end="", flush=True)
                     args = ((f"https://www.javbus.com/{base}/{i}", xpath) for i in range(idx, idx + step))
                     try:
-                        yield from chain.from_iterable(ex.map(self._scrap_page, args))
+                        yield from chain.from_iterable(ex.map(cls._scrap_page, args))
                     except LastPageReached:
                         break
                     idx += step
                 print()
 
-    def _scrape_javdb(self) -> Iterator[str]:
+    @classmethod
+    def _scrape_javdb(cls) -> Iterator[str]:
 
         print(f"Scanning javdb...")
         xpath = etree.XPath('//*[@id="videos"]//a/div[@class="uid"]/text()')
         args = ((f"https://javdb.com/{p}?page={i}", xpath) for p in ("uncensored", "") for i in range(1, 81))
 
         with ThreadPoolExecutor(max_workers=3) as ex:
-            for future in as_completed(ex.submit(self._scrap_page, i) for i in args):
+            for future in as_completed(ex.submit(cls._scrap_page, i) for i in args):
                 try:
                     for i in future.result():
                         yield i
@@ -374,6 +379,9 @@ class JavREBuilder:
 
 
 class Analyzer:
+
+    VIDEOS = (".mp4", ".wmv", ".avi", ".iso", ".m2ts")
+
     def __init__(self, report_dir: Path, regex_file: Path, scraper: MteamScraper) -> None:
 
         self.av_matcher = re.compile(regex_file.read_text(encoding="utf-8").strip(), flags=re.M).search
@@ -398,7 +406,7 @@ class Analyzer:
         prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]?)?\b").search
         word_finder = re.compile(r"(?!\d+\b)\w{3,}").findall
 
-        flat_counter = defaultdict(set)
+        flat_counter = defaultdict(list)
         prefix_counter = Counter()
         word_counter = Counter()
         tmp = set()
@@ -421,7 +429,7 @@ class Analyzer:
 
                 for m in filter(None, map(prefix_searcher, video)):
                     prefix = m[1]
-                    flat_counter[prefix].add(m[0])
+                    flat_counter[prefix].append(m[0])
                     tmp.add(prefix)
 
                 prefix_counter.update(tmp)
@@ -431,18 +439,17 @@ class Analyzer:
                 word_counter.update(tmp)
                 tmp.clear()
 
-        prefixes = [(i, len(v), k, v) for k, v in flat_counter.items() if (i := prefix_counter[k]) >= 3]
+        stat = self._get_stat("Match", total, total - unmatched)
+        result = [(i, len(v), k, set(v)) for k, v in flat_counter.items() if (i := prefix_counter[k]) >= 3]
+        result.sort(reverse=True)
         words = [(v, k) for k, v in word_counter.items() if v >= 3]
-        prefixes.sort(reverse=True)
         words.sort(reverse=True)
-        stat = self._get_stat("Matched", total, total - unmatched)
 
         with unmatch_freq.open("w", encoding="utf-8") as f:
             f.write(stat + "\n\n")
 
             f.write("Potential ID Prefixes:\n\n")
-            f.write("{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format("uniq", "occur", "word", "strings", ""))
-            f.writelines(f"{i:6d}  {j:6d}  {k:15}  {s}\n" for i, j, k, s in prefixes)
+            f.writelines(self._format_report(result))
 
             f.write("\n\nPotential Keywords:\n\n")
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
@@ -486,33 +493,38 @@ class Analyzer:
                     torrent_counter.update(tmp)
                     tmp.clear()
 
+        stat = self._get_stat("Mismatch", total, mismatched)
         result = [(torrent_counter[k], len(v), k, set(v)) for k, v in flat_counter.items()]
         result.sort(reverse=True)
-        stat = self._get_stat("Mismatched", total, mismatched)
 
         with mismatched_file.open("w", encoding="utf-8") as f:
             f.write(stat + "\n\n")
-            f.write("{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format("uniq", "occur", "word", "strings", ""))
-            f.writelines(f"{i:6d}  {j:6d}  {k:15}  {s}\n" for i, j, k, s in result)
+            f.writelines(self._format_report(result))
 
         print(stat)
         print(f"Result saved to: {mismatched_file}")
 
-    @staticmethod
-    def _match_av(path: Path, matcher: Callable) -> Tuple[str]:
-        with path.open("r", encoding="utf-8") as f:
+    @classmethod
+    def _match_av(cls, path: Path, matcher: Callable) -> Tuple[str]:
+        with open(path, "r", encoding="utf-8") as f:
             if not any(map(matcher, f)):
                 f.seek(0)
-                return tuple(i for i in f if i.endswith((".mp4", ".wmv", ".avi", ".iso", ".m2ts"), None, -1))
+                return tuple(i for i in f if i.endswith(cls.VIDEOS, None, -1))
 
     @staticmethod
     def _match_non_av(path: Path, matcher: Callable) -> Tuple[str]:
-        with path.open("r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             return tuple(m[0] for m in map(matcher, f) if m)
 
     @staticmethod
     def _get_stat(name: str, total: int, n: int):
         return f"Total: {total}. {name}: {n}. Percentage: {n / total * 100:.2f}%."
+
+    @staticmethod
+    def _format_report(result: Iterable):
+        yield "{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format("uniq", "occur", "word", "strings", "")
+        for i, j, k, s in result:
+            yield f"{i:6d}  {j:6d}  {k:15}  {_repr(s)[1:-1]}\n"
 
 
 def parse_config(configfile: str):

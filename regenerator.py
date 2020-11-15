@@ -60,7 +60,7 @@ class Parser:
         self.hold = []
         self.charset = []
         self.index = 0
-        self.subParser = self.optimizer = None
+        self.subParser = None
 
     def parse(self, string):
         """Convert a regular expression to a tokenset."""
@@ -204,9 +204,7 @@ class Parser:
             self._concat_hold()
             self.result.extend(tuple([*x, *y] for y in subToken for x in self.result))
         else:
-            if self.optimizer is None:
-                self.optimizer = Optimizer()
-            substr = self.optimizer.compute(frozenset(subToken), omitOuterParen=True)
+            substr = optimize(frozenset(subToken), omitOuterParen=True)
             hold.append(substr + suffix if self._is_char_block(substr) else f"({substr}){suffix}")
 
     def _concat_hold(self):
@@ -270,235 +268,232 @@ class Parser:
             pass
 
 
-class Optimizer:
-    def __init__(self) -> None:
-        self._prefix = defaultdict(set)
-        self._suffix = defaultdict(set)
+@lru_cache(maxsize=4096)
+def optimize(tokenSet: frozenset, omitOuterParen: bool = False) -> str:
+    """Compute an optimized regular expression from the given tokenset."""
 
-    @lru_cache(maxsize=4096)
-    def compute(self, tokenSet: frozenset, omitOuterParen: bool = False) -> str:
-        """Compute an optimized regular expression for the given tokenset."""
+    tokenSet = set(tokenSet)
+    if () in tokenSet:
+        quantifier = "?"
+        tokenSet.remove(())
+    else:
+        quantifier = ""
 
-        tokenSet = set(tokenSet)
-        if () in tokenSet:
-            quantifier = "?"
+    if any(map(_is_word, tokenSet)):
+        return _wordStrategy(tokenSet, quantifier, omitOuterParen)
+
+    try:
+        return _charsetStrategy(tokenSet, quantifier)
+    except KeyError:
+        return ""
+
+
+def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
+
+    tokenSetLength = len(tokenSet)
+    if tokenSetLength == 1:
+        string = "".join(*tokenSet)
+        return f"({string}){quantifier}" if quantifier else string
+
+    result = []
+    segment = {}
+    candidate = {}
+    unvisitCand = set()
+    mirror = defaultdict(list)
+    frozenUnion = frozenset().union
+    prefix = defaultdict(set)
+    suffix = defaultdict(set)
+
+    for token in tokenSet:
+        left = {token[:i]: token[i:] for i in range(1, len(token))}
+        right = {v: k for k, v in left.items()}
+        left[token] = right[token] = ()
+        segment[token] = left, right
+        for k in left:
+            prefix[k].add(token)
+        for k in right:
+            suffix[k].add(token)
+
+    prefix = _filter_affix(prefix)
+    suffix = _filter_affix(suffix)
+
+    if quantifier:
+        tokenSet.add(())
+        tokenSetLength += 1
+    factor = tokenSetLength + 1
+
+    while prefix or suffix:
+
+        for source, i in (prefix, 0), (suffix, 1):
+
+            for k, v in source.items():
+                mirror[frozenset(segment[j][i][k] for j in v)].append(k)
+
+            for k, v in mirror.items():
+                if tokenSet.issuperset(k):
+                    key = k.union(*map(source.get, v))
+                    v.append(())
+                else:
+                    key = frozenUnion(*map(source.get, v))
+
+                if key not in candidate:
+                    left = optimize(k)
+                    right = optimize(frozenset(v))
+                    string = (left + right) if i else (right + left)
+                    length = len(key)
+                    value = (
+                        sum(map(len, chain.from_iterable(key)))
+                        + length
+                        + 2 * (length == tokenSetLength)
+                        - len(string)
+                        - 1
+                    ) * factor - length
+                    candidate[key] = (value, string) if value > 0 else None
+
+                if candidate[key]:
+                    unvisitCand.add(key)
+
+            mirror.clear()
+
+        if not unvisitCand:
+            break
+        for key in _optimize_group(unvisitCand, candidate):
+            result.append(candidate[key][1])
+            tokenSet.difference_update(key)
+
+        if not tokenSet:
+            break
+        prefix = _update_affix(prefix, tokenSet)
+        suffix = _update_affix(suffix, tokenSet)
+
+    if quantifier:
+        try:
             tokenSet.remove(())
-        else:
+        except KeyError:
             quantifier = ""
 
-        if any(map(self._is_word, tokenSet)):
-            return self._wordStrategy(tokenSet, quantifier, omitOuterParen)
+    if tokenSet:
+        chars = set(filterfalse(_is_word, tokenSet))
+        if len(chars) > 2:
+            tokenSet.difference_update(chars)
+            result.append(_charsetStrategy(chars))
+        result.extend(map("".join, tokenSet))
 
-        try:
-            return self._charsetStrategy(tokenSet, quantifier)
-        except KeyError:
-            return ""
+    result.sort()
+    string = "|".join(result)
 
-    @staticmethod
-    def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
+    if len(result) > 1 and not omitOuterParen or quantifier:
+        return f"({string}){quantifier}"
+    return string
 
-        if len(tokenSet) > 1:
-            char = sorted(chain.from_iterable(tokenSet))
 
-            if ("]",) in tokenSet:
-                char.insert(0, char.pop(char.index("]")))
-            if ("-",) in tokenSet:
-                char.append(char.pop(char.index("-")))
+def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
 
-            return f'[{"".join(char)}]{quantifier}'
+    if len(tokenSet) > 1:
+        char = sorted(chain.from_iterable(tokenSet))
 
-        return f"{tokenSet.pop()[0]}{quantifier}"
+        if ("]",) in tokenSet:
+            char.insert(0, char.pop(char.index("]")))
+        if ("-",) in tokenSet:
+            char.append(char.pop(char.index("-")))
 
-    def _wordStrategy(self, tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
+        return f'[{"".join(char)}]{quantifier}'
 
-        tokenSetLength = len(tokenSet)
-        if tokenSetLength == 1:
-            string = "".join(*tokenSet)
-            return f"({string}){quantifier}" if quantifier else string
+    return f"{tokenSet.pop()[0]}{quantifier}"
 
-        result = []
-        segment = {}
-        candidate = {}
-        unvisitCand = set()
-        mirror = defaultdict(list)
-        frozenUnion = frozenset().union
-        prefix = self._prefix
-        suffix = self._suffix
 
-        for token in tokenSet:
-            left = {token[:i]: token[i:] for i in range(1, len(token))}
-            right = {v: k for k, v in left.items()}
-            left[token] = right[token] = ()
-            segment[token] = left, right
-            for k in left:
-                prefix[k].add(token)
-            for k in right:
-                suffix[k].add(token)
+@lru_cache(maxsize=512)
+def _is_word(token: tuple):
+    return sum(map(len, token)) > 1
 
-        prefix = self._filter_affix(prefix)
-        suffix = self._filter_affix(suffix)
-        self._prefix.clear()
-        self._suffix.clear()
 
-        if quantifier:
-            tokenSet.add(())
-            tokenSetLength += 1
-        factor = tokenSetLength + 1
+def _filter_affix(d: dict) -> dict:
+    """Keep groups which divide the same words at max common subsequence,
+    and remove single member groups.
 
-        while prefix or suffix:
+    - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first
+        item will be keeped.
+    """
+    tmp = {}
+    for k, v in d.items():
+        if len(v) > 1:
+            key = frozenset(v)
+            val = len(k), k
+            if tmp.setdefault(key, val) < val:
+                tmp[key] = val
+    return {v: d[v] for _, v in tmp.values()}
 
-            for source, i in (prefix, 0), (suffix, 1):
 
-                for k, v in source.items():
-                    mirror[frozenset(segment[j][i][k] for j in v)].append(k)
+def _update_affix(d: dict, r: set) -> dict:
+    for v in d.values():
+        v.intersection_update(r)
+    return {k: v for k, v in d.items() if len(v) > 1}
 
-                for k, v in mirror.items():
-                    if tokenSet.issuperset(k):
-                        key = k.union(*map(source.get, v))
-                        v.append(())
-                    else:
-                        key = frozenUnion(*map(source.get, v))
 
-                    if key not in candidate:
-                        left = self.compute(k)
-                        right = self.compute(frozenset(v))
-                        string = (left + right) if i else (right + left)
-                        length = len(key)
-                        value = (
-                            sum(map(len, chain.from_iterable(key)))
-                            + length
-                            + 2 * (length == tokenSetLength)
-                            - len(string)
-                            - 1
-                        ) * factor - length
-                        candidate[key] = (value, string) if value > 0 else None
+def _optimize_group(unvisited: set, candidate: dict):
+    """Divide candidates into groups that each group is internally connected
+    with common members. Then for each group, find the best non-overlapping
+    members to reach the maximum length reduction.
 
-                    if candidate[key]:
-                        unvisitCand.add(key)
+    - Yield: Optimal keys
+    - The input set (1st arg) will be finally emptied.
+    """
+    if len(unvisited) == 1:
+        yield unvisited.pop()
+        return
 
-                mirror.clear()
+    stack = []
+    pool = {}
+    while unvisited:
 
-            if not unvisitCand:
-                break
-            for key in self._optimize_group(unvisitCand, candidate):
-                result.append(candidate[key][1])
-                tokenSet.difference_update(key)
+        currentKey = unvisited.pop()
+        if all(map(currentKey.isdisjoint, unvisited)):
+            yield currentKey
+            continue
 
-            if not tokenSet:
-                break
-            prefix = self._update_affix(prefix, tokenSet)
-            suffix = self._update_affix(suffix, tokenSet)
+        model = cp_model.CpModel()
+        pool[currentKey] = model.NewBoolVar("0")
+        stack.append(currentKey)
+        index = 1
 
-        if quantifier:
-            try:
-                tokenSet.remove(())
-            except KeyError:
-                quantifier = ""
+        while stack:
+            currentKey = stack.pop()
+            unvisited.discard(currentKey)
+            currentVarNot = pool[currentKey].Not()
 
-        if tokenSet:
-            chars = set(filterfalse(self._is_word, tokenSet))
-            if len(chars) > 2:
-                tokenSet.difference_update(chars)
-                result.append(self._charsetStrategy(chars))
-            result.extend(map("".join, tokenSet))
+            if () in currentKey:
+                currentKey = currentKey.difference(((),))
 
-        result.sort()
-        string = "|".join(result)
+            for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
+                try:
+                    nextVar = pool[nextKey]
+                except KeyError:
+                    nextVar = model.NewBoolVar(f"{index}")
+                    index += 1
+                    pool[nextKey] = nextVar
+                    stack.append(nextKey)
+                model.AddImplication(nextVar, currentVarNot)
 
-        if len(result) > 1 and not omitOuterParen or quantifier:
-            return f"({string}){quantifier}"
-        return string
-
-    @staticmethod
-    @lru_cache(maxsize=512)
-    def _is_word(token: tuple):
-        return sum(map(len, token)) > 1
-
-    @staticmethod
-    def _filter_affix(d: dict) -> dict:
-        """Keep groups which divide the same words at max common subsequence,
-        and remove single member groups.
-
-        - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first
-          item will be keeped.
-        """
-        tmp = {}
-        for k, v in d.items():
-            if len(v) > 1:
-                key = frozenset(v)
-                val = len(k), k
-                if tmp.setdefault(key, val) < val:
-                    tmp[key] = val
-        return {v: d[v] for _, v in tmp.values()}
-
-    @staticmethod
-    def _update_affix(d: dict, r: set) -> dict:
-        for v in d.values():
-            v.intersection_update(r)
-        return {k: v for k, v in d.items() if len(v) > 1}
-
-    @staticmethod
-    def _optimize_group(unvisited: set, candidate: dict):
-        """Divide candidates into groups that each group is internally connected
-        with common members. Then for each group, find the best non-overlapping
-        members to reach the maximum length reduction.
-
-        - Yield: Optimal keys
-        - The input set (1st arg) will be finally emptied.
-        """
-        if len(unvisited) == 1:
-            yield unvisited.pop()
-            return
-
-        stack = []
-        pool = {}
-        while unvisited:
-
-            currentKey = unvisited.pop()
-            if all(map(currentKey.isdisjoint, unvisited)):
-                yield currentKey
-                continue
-
-            model = cp_model.CpModel()
-            pool[currentKey] = model.NewBoolVar("0")
-            stack.append(currentKey)
-            index = 1
-
-            while stack:
-                currentKey = stack.pop()
-                unvisited.discard(currentKey)
-                currentVarNot = pool[currentKey].Not()
-
-                if () in currentKey:
-                    currentKey = currentKey.difference(((),))
-
-                for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
-                    try:
-                        nextVar = pool[nextKey]
-                    except KeyError:
-                        nextVar = model.NewBoolVar(f"{index}")
-                        index += 1
-                        pool[nextKey] = nextVar
-                        stack.append(nextKey)
-                    model.AddImplication(nextVar, currentVarNot)
-
-            model.Maximize(
-                cp_model.LinearExpr.ScalProd(
-                    pool.values(),
-                    tuple(candidate[k][0] for k in pool),
-                )
+        model.Maximize(
+            cp_model.LinearExpr.ScalProd(
+                pool.values(),
+                tuple(candidate[k][0] for k in pool),
             )
+        )
 
-            solver = cp_model.CpSolver()
-            status = solver.Solve(model)
-            if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
-                raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
+        solver = cp_model.CpSolver()
+        status = solver.Solve(model)
+        if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
+            raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
-            yield from compress(pool, map(solver.BooleanValue, pool.values()))
-            pool.clear()
+        yield from compress(pool, map(solver.BooleanValue, pool.values()))
+        pool.clear()
 
 
 class Regen:
+
+    __slots__ = ["_tokens", "_cache"]
+
     def __init__(self, wordlist: Iterable[str]) -> None:
 
         if not isinstance(wordlist, Iterable) or isinstance(wordlist, str):
@@ -506,8 +501,7 @@ class Regen:
 
         parser = Parser()
         self._tokens = frozenset(chain.from_iterable(map(parser.parse, wordlist)))
-        self._text = self.optimizer = None
-        self._regex = [None, None]
+        self._cache = {}
 
     def __repr__(self):
         inner = ", ".join(f"'{w}'" for w in self.to_text())
@@ -515,9 +509,11 @@ class Regen:
 
     def to_text(self):
         """Extract the regular expressions to a list of corresponding words."""
-        if self._text is None:
-            self._text = sorted(map("".join, self._tokens))
-        return iter(self._text)
+        try:
+            text = self._cache["text"]
+        except KeyError:
+            text = self._cache["text"] = sorted(map("".join, self._tokens))
+        return iter(text)
 
     def to_regex(self, omitOuterParen: bool = False) -> str:
         """Return an optimized regular expression matching all the words.
@@ -527,16 +523,16 @@ class Regen:
         if not isinstance(omitOuterParen, bool):
             raise TypeError("omitOuterParen should be a bool.")
 
-        if self._regex[omitOuterParen] is None:
-            if not self.optimizer:
-                self.optimizer = Optimizer()
-            self._regex[omitOuterParen] = self.optimizer.compute(self._tokens, omitOuterParen=omitOuterParen)
+        try:
+            regex = self._cache[omitOuterParen]
+        except KeyError:
+            regex = self._cache[omitOuterParen] = optimize(self._tokens, omitOuterParen)
 
-        return self._regex[omitOuterParen]
+        return regex
 
     def verify_result(self):
         try:
-            regex = next(i for i in self._regex if i is not None)
+            regex = next(v for k, v in self._cache.items() if isinstance(k, bool))
         except StopIteration:
             regex = self.to_regex()
 
@@ -624,7 +620,7 @@ def main():
     if args.file is None:
         wordlist = args.word
     else:
-        wordlist = tuple(filter(None, args.file.read().splitlines()))
+        wordlist = filter(None, args.file.read().splitlines())
         args.file.close()
 
     regen = Regen(wordlist)
