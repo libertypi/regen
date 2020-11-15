@@ -248,6 +248,7 @@ blkw
 blmc
 blo
 blor
+blue
 bmay
 bmc
 bmd
@@ -903,6 +904,9 @@ fuga
 ful
 fxd
 fzk
+gachi
+gachig
+gachip
 gah
 gaid
 gams

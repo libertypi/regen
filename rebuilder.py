@@ -24,6 +24,8 @@ from torrentool.exceptions import TorrentoolException
 
 from regenerator import Regen
 
+_THRESH = 5
+
 
 class LastPageReached(Exception):
     pass
@@ -262,7 +264,7 @@ class JavREBuilder:
         uniq_id.update(self._normalize_id(chain(self._scrape_javbus(), self._scrape_javdb(), self._scrape_github())))
 
         prefix_counter = Counter(map(itemgetter(0), uniq_id))
-        final = {k for k, v in prefix_counter.items() if v >= 5}
+        final = {k for k, v in prefix_counter.items() if v >= _THRESH}
 
         print(f"Uniq ID: {len(uniq_id)}. Uniq prefix: {len(prefix_counter)}. Final: {len(final)}.")
         return final
@@ -440,9 +442,9 @@ class Analyzer:
                 tmp.clear()
 
         stat = self._get_stat("Match", total, total - unmatched)
-        result = [(i, len(v), k, set(v)) for k, v in flat_counter.items() if (i := prefix_counter[k]) >= 3]
+        result = [(i, len(v), k, set(v)) for k, v in flat_counter.items() if (i := prefix_counter[k]) >= _THRESH]
         result.sort(reverse=True)
-        words = [(v, k) for k, v in word_counter.items() if v >= 3]
+        words = [(v, k) for k, v in word_counter.items() if v >= _THRESH]
         words.sort(reverse=True)
 
         with unmatch_freq.open("w", encoding="utf-8") as f:
