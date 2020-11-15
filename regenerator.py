@@ -492,7 +492,7 @@ def _optimize_group(unvisited: set, candidate: dict):
 
 class Regen:
 
-    __slots__ = ["_tokens", "_cache"]
+    __slots__ = ["_tokens", "_text", "_cache"]
 
     def __init__(self, wordlist: Iterable[str]) -> None:
 
@@ -510,9 +510,9 @@ class Regen:
     def to_text(self):
         """Extract the regular expressions to a list of corresponding words."""
         try:
-            text = self._cache["text"]
-        except KeyError:
-            text = self._cache["text"] = sorted(map("".join, self._tokens))
+            text = self._text
+        except AttributeError:
+            text = self._text = sorted(map("".join, self._tokens))
         return iter(text)
 
     def to_regex(self, omitOuterParen: bool = False) -> str:
@@ -532,7 +532,7 @@ class Regen:
 
     def verify_result(self):
         try:
-            regex = next(v for k, v in self._cache.items() if isinstance(k, bool))
+            regex = next(iter(self._cache.values()))
         except StopIteration:
             regex = self.to_regex()
 
