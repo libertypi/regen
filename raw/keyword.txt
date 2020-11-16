@@ -5,7 +5,7 @@
 (erotica|hard)x
 (exotic|tiny)4k
 (ftv|wow|t)girls
-(lethal|handson|party)hardcore
+(lethal|handson|party)\s*hardcore
 (n|k|kb)[0-2][0-9]{3}
 (pornstar|bigbutt|teen|milf)slikeitbig
 (true|elegant|girlstry)anal
@@ -39,6 +39,7 @@ digital\s*playground
 dorcelclub
 downblouseloving
 evilangel
+exxxtra\s*small
 facial\s*abuse
 fakedrivingschool
 familystrokes
@@ -67,17 +68,19 @@ kink
 legalporno
 lesbea
 mesubuta
+met[ _-]?artx?
 monstersofcock
 mura(mura)?
 myveryfirsttime
 naughty\s*america(vr)?
+new\s*sensations
 nyoshin
 paco(pacomama)?
 passion-?hd
 pervcity
 playboyplus
 porn(hub|pros|megaload|world|18|o|fidelity)?
-publicagent
+public\s*agent
 realitykings
 sellyourgf
 sexart
@@ -96,4 +99,5 @@ vixen
 wakeupnfuck
 wankitnow
 x-?(sensual|art|angels)
+x1x
 xxx[ _-]?av

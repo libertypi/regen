@@ -8,6 +8,7 @@ cz
 czbd
 dv
 eq
+gg
 gm
 gs
 isi
@@ -33,5 +34,4 @@ sw
 t28
 tap
 wa
-x1x
 xv

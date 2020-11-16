@@ -959,6 +959,7 @@ gexp
 gfa
 gfs
 gft
+gg
 ggen
 ggh
 ggsid
@@ -3023,7 +3024,6 @@ wvo
 wwd
 wwk
 wzen
-x1x
 xkk
 xmom
 xnd
