@@ -34,7 +34,7 @@ for internal uses only.
 ### Author: `David Pi`
 """
 
-__all__ = ["Regen"]
+__all__ = ("Regen",)
 
 import re
 from collections import defaultdict
@@ -492,7 +492,7 @@ def _optimize_group(unvisited: set, candidate: dict):
 
 class Regen:
 
-    __slots__ = ["_tokens", "_text", "_cache"]
+    __slots__ = ("_tokens", "_text", "_cache")
 
     def __init__(self, wordlist: Iterable[str]) -> None:
 
