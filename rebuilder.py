@@ -259,8 +259,9 @@ class JavREBuilder:
     def _web_scrape(self) -> Set[str]:
 
         result = set(self._scrape_mteam())
-        for func in self._scrape_javbus, self._scrape_javdb, self._scrape_github:
-            result.update(self._normalize_id(func()))
+        result.update(self._normalize_id(self._scrape_javbus()))
+        result.update(self._normalize_id(self._scrape_javdb()))
+        result.update(self._normalize_id(self._scrape_github()))
 
         uniq_id = len(result)
         prefix_counter = Counter(map(itemgetter(0), result))
@@ -280,7 +281,7 @@ class JavREBuilder:
         print("Scanning mteam...")
 
         matcher = re.compile(
-            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[1-9]?)?\b.*\.(?:mp4|wmv|avi|iso)$",
+            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[1-9]?)?\b.*\.(?:mp4|wmv|avi|mkv|iso)$",
             flags=re.MULTILINE,
         ).search
 
@@ -381,9 +382,6 @@ class JavREBuilder:
 
 
 class Analyzer:
-
-    VIDEOS = (".mp4", ".wmv", ".avi", ".iso", ".m2ts")
-
     def __init__(self, report_dir: Path, regex_file: Path, scraper: MteamScraper) -> None:
 
         self.av_matcher = re.compile(regex_file.read_text(encoding="utf-8").strip()).search
@@ -404,7 +402,7 @@ class Analyzer:
         total = unmatched = 0
         sep = "-" * 80 + "\n"
 
-        av_matcher = self.av_matcher
+        self.isvideo = re.compile(r"\.(?:mp4|wmv|avi|mkv|iso|m2ts)$", flags=re.M).search
         prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]?)?\b").search
         word_finder = re.compile(r"(?!\d+\b)\w{3,}").findall
 
@@ -416,7 +414,7 @@ class Analyzer:
         with ProcessPoolExecutor(max_workers=None) as ex, unmatch_raw.open("w", encoding="utf-8") as f:
 
             paths = self.scraper.run(page, lo, hi, is_av=True)
-            futures = as_completed(ex.submit(self._match_av, p, av_matcher) for p in paths)
+            futures = as_completed(ex.submit(self._match_av, p) for p in paths)
 
             for video in map(Future.result, futures):
 
@@ -467,7 +465,6 @@ class Analyzer:
         page = "torrents.php"
         mismatched_file = self.report_dir.joinpath("mismatch_frequency.txt")
         word_searcher = re.compile(r"[a-z]+").search
-        matcher = self.av_matcher
         total = mismatched = 0
 
         flat_counter = defaultdict(list)
@@ -478,7 +475,7 @@ class Analyzer:
 
             paths = self.scraper.run(page, lo, hi, is_av=False)
 
-            for ft in as_completed(ex.submit(self._match_non_av, p, matcher) for p in paths):
+            for ft in as_completed(ex.submit(self._match_non_av, p) for p in paths):
 
                 total += 1
                 for m in ft.result():
@@ -506,17 +503,15 @@ class Analyzer:
         print(stat)
         print(f"Result saved to: {mismatched_file}")
 
-    @classmethod
-    def _match_av(cls, path: Path, matcher: Callable) -> Tuple[str]:
+    def _match_av(self, path: Path) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:
-            if not any(map(matcher, f)):
+            if not any(map(self.av_matcher, f)):
                 f.seek(0)
-                return tuple(i for i in f if i.endswith(cls.VIDEOS, None, -1))
+                return tuple(filter(self.isvideo, f))
 
-    @staticmethod
-    def _match_non_av(path: Path, matcher: Callable) -> Tuple[str]:
+    def _match_non_av(self, path: Path) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(m[0] for m in map(matcher, f) if m)
+            return tuple(m[0] for m in map(self.av_matcher, f) if m)
 
     @staticmethod
     def _get_stat(name: str, total: int, n: int):

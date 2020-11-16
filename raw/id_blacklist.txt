@@ -18,6 +18,7 @@ new
 one
 rain
 room
+sea
 show
 top
 two

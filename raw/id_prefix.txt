@@ -2464,7 +2464,6 @@ sdnt
 sdsi
 sdxx
 sdz
-sea
 seed
 sek
 sekao
@@ -2857,7 +2856,6 @@ tura
 turb
 turu
 tus
-tushy
 tvg
 tvr
 twd
