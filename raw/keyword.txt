@@ -35,15 +35,15 @@ ddfnetwork
 defloration
 desperateamateurs
 devilsfilm
-digitalplayground
+digital\s*playground
 dorcelclub
 downblouseloving
 evilangel
-facialabuse
+facial\s*abuse
 fakedrivingschool
 familystrokes
-fc2([ _-]*ppv)?
-fellatiojapan
+fc2(ppv)?
+fellatio\s*japan
 fetishtheatre
 firstanalquest
 footjob
@@ -70,7 +70,7 @@ mesubuta
 monstersofcock
 mura(mura)?
 myveryfirsttime
-naughtyamerica(vr)?
+naughty\s*america(vr)?
 nyoshin
 paco(pacomama)?
 passion-?hd
@@ -86,7 +86,7 @@ shemale
 siterip
 sm[ _-]?miracle
 teenfidelity
-teenslove((huge|black)cocks|cream|money|anal)
+teenslove((huge|black)cocks|anal)
 th101
 threesome
 tokyo[ _-]?hot

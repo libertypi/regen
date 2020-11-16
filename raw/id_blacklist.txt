@@ -11,6 +11,7 @@ girl
 img
 ink
 jan
+king
 line
 love
 man
@@ -26,3 +27,4 @@ video
 wife
 wing
 world
+www

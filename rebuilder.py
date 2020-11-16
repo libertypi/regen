@@ -43,8 +43,7 @@ class MteamScraper:
     def run(self, page: str, lo: int, hi: int, is_av: bool, cjk_only: bool = False) -> Iterator[Path]:
 
         subdir = self._cache_dir.joinpath("av" if is_av else "non_av")
-        if not subdir.exists():
-            subdir.mkdir(parents=True)
+        subdir.mkdir(parents=True, exist_ok=True)
 
         if not self._fetch:
             path = None
@@ -182,9 +181,7 @@ class JavREBuilder:
     ):
 
         self.output_file = output_file
-
-        if not raw_dir.exists():
-            raw_dir.mkdir(parents=True)
+        raw_dir.mkdir(parents=True, exist_ok=True)
 
         self.kw_file = raw_dir.joinpath("keyword.txt")
         self.prefix_file = raw_dir.joinpath("id_prefix.txt")
@@ -386,9 +383,7 @@ class Analyzer:
 
         self.av_matcher = re.compile(regex_file.read_text(encoding="utf-8").strip()).search
 
-        if not report_dir.exists():
-            report_dir.mkdir(parents=True)
-
+        report_dir.mkdir(parents=True, exist_ok=True)
         self.report_dir = report_dir
         self.scraper = scraper
 

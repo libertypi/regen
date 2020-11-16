@@ -1421,7 +1421,6 @@ kid
 kifd
 kil
 kimu
-king
 kir
 kira
 kiray
@@ -1467,6 +1466,7 @@ konn
 kool
 kop
 kosatsu
+kosatu
 kosk
 koz
 kpb
@@ -2396,6 +2396,7 @@ s3dbd
 sab
 saba
 sabe
+sacai
 sace
 sad
 sadt
@@ -2536,6 +2537,7 @@ sit
 sitw
 siv
 sivr
+sjd
 sjdv
 sjml
 sjok
@@ -3020,7 +3022,6 @@ wtk
 wvo
 wwd
 wwk
-www
 wzen
 x1x
 xkk
