@@ -1429,6 +1429,7 @@ kird
 kire
 kiri
 kisd
+kitaike
 kitd
 kiwvr
 kizn
@@ -2395,7 +2396,6 @@ s3dbd
 sab
 saba
 sabe
-sacai
 sace
 sad
 sadt
@@ -2537,7 +2537,6 @@ sit
 sitw
 siv
 sivr
-sjd
 sjdv
 sjml
 sjok

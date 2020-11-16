@@ -152,7 +152,7 @@ class MteamScraper:
 
             try:
                 torrent_file.write_bytes(content)
-                filelist = subprocess.check_output(("transmission-show", torrent_file), encoding="utf-8")
+                filelist = subprocess.check_output(("transmission-show", torrent_file), text=True)
                 filelist = spliter.findall(filelist, filelist.index("\n\nFILES\n\n"))
                 if not filelist:
                     raise ValueError
@@ -386,7 +386,7 @@ class Analyzer:
 
     def __init__(self, report_dir: Path, regex_file: Path, scraper: MteamScraper) -> None:
 
-        self.av_matcher = re.compile(regex_file.read_text(encoding="utf-8").strip(), flags=re.M).search
+        self.av_matcher = re.compile(regex_file.read_text(encoding="utf-8").strip()).search
 
         if not report_dir.exists():
             report_dir.mkdir(parents=True)
