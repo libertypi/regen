@@ -35,9 +35,10 @@ class MteamScraper:
 
     DOMAIN = "https://pt.m-team.cc/"
 
-    def __init__(self, cache_dir: Path, fetch: bool = False) -> None:
+    def __init__(self, cache_dir: Path, account: Tuple[str, str], fetch: bool = False) -> None:
 
         self._cache_dir = cache_dir
+        self._account = account
         self._fetch = fetch
 
     def run(self, page: str, lo: int, hi: int, is_av: bool, cjk_only: bool = False) -> Iterator[Path]:
@@ -64,6 +65,7 @@ class MteamScraper:
                 '//form[@id="form_torrent"]//table[@class="torrentname"]//a[contains(@href, "download.php")]/@href'
             )
 
+        self._login()
         pool = []
         with ThreadPoolExecutor(max_workers=None) as ex:
             for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, hi)):
@@ -77,6 +79,24 @@ class MteamScraper:
                     else:
                         pool.append(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
             yield from filter(None, map(Future.result, as_completed(pool)))
+
+    def _login(self):
+        for retry in range(3):
+            try:
+                res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
+                if "/login.php" in res.url:
+                    session.post(
+                        url=f"{self.DOMAIN}/takelogin.php",
+                        data={"username": self._account[0], "password": self._account[1]},
+                        headers={"referer": f"{self.DOMAIN}/login.php"},
+                    )
+                res.raise_for_status()
+            except requests.RequestException:
+                if retry == 2:
+                    raise
+                sleep(1)
+            else:
+                return
 
     @staticmethod
     def _make_cjk_parser():
@@ -529,7 +549,8 @@ def parse_config(configfile: str):
     parser["DEFAULT"] = {
         "output_file": "",
         "cache_dir": "",
-        "session_file": "",
+        "mteam_username": "",
+        "mteam_password": "",
         "mteam_page": "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
         "mteam_limit": "500",
     }
@@ -598,14 +619,29 @@ def parse_arguments():
     return args
 
 
-def read_session(session_file: Path):
+def load_session(session_file):
 
-    with open(session_file, "rb") as f:
-        s: requests.Session = pickle.load(f)[4]
-    s.cookies.set_cookie(requests.cookies.create_cookie(domain="www.javbus.com", name="existmag", value="all"))
+    try:
+        with open(session_file, "rb") as f:
+            s: requests.Session = pickle.load(f)
+
+        if not isinstance(s, requests.Session):
+            raise ValueError
+
+    except (OSError, pickle.PickleError, ValueError):
+        s = requests.Session()
+        s.cookies.set_cookie(requests.cookies.create_cookie(domain="www.javbus.com", name="existmag", value="all"))
+        s.headers.update(
+            {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"}
+        )
 
     global session
     session = s
+
+
+def save_session(session_file):
+    with open(session_file, "wb") as f:
+        pickle.dump(session, f)
 
 
 def main():
@@ -615,11 +651,15 @@ def main():
     config = parse_config("rebuilder.ini")
     args = parse_arguments()
 
-    read_session(Path(config["session_file"] or None))
+    raw_dir = Path("raw")
+    report_dir = Path("report")
+    session_file = raw_dir.joinpath("cookies")
     output_file = Path(config["output_file"] or "regex.txt")
 
+    load_session(session_file)
     mteam_scraper = MteamScraper(
         cache_dir=Path(config["cache_dir"] or "cache"),
+        account=(config["mteam_username"], config["mteam_password"]),
         fetch=args.fetch,
     )
 
@@ -627,7 +667,7 @@ def main():
 
         regex = JavREBuilder(
             output_file=output_file,
-            raw_dir=Path("raw"),
+            raw_dir=raw_dir,
             mteam_scraper=mteam_scraper,
             mteam_page=config["mteam_page"],
             mteam_limit=config.getint("mteam_limit") or 500,
@@ -641,7 +681,7 @@ def main():
     else:
 
         analyzer = Analyzer(
-            report_dir=Path("report"),
+            report_dir=report_dir,
             regex_file=output_file,
             scraper=mteam_scraper,
         )
@@ -650,6 +690,8 @@ def main():
             analyzer.analyze_av(*args.range)
         else:
             analyzer.analyze_non_av(*args.range)
+
+    save_session(session_file)
 
 
 if __name__ == "__main__":
