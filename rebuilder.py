@@ -84,13 +84,13 @@ class MteamScraper:
         for retry in range(3):
             try:
                 res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
+                res.raise_for_status()
                 if "/login.php" in res.url:
                     session.post(
                         url=f"{self.DOMAIN}/takelogin.php",
                         data={"username": self._account[0], "password": self._account[1]},
                         headers={"referer": f"{self.DOMAIN}/login.php"},
                     )
-                res.raise_for_status()
             except requests.RequestException:
                 if retry == 2:
                     raise

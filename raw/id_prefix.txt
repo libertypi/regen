@@ -798,7 +798,6 @@ esk
 etc
 etemb
 etqr
-etqt
 etvco
 etvtm
 euud
@@ -1310,7 +1309,6 @@ jjpp
 jjv
 jkd
 jkfi
-jkk
 jklo
 jkna
 jknk
@@ -1805,7 +1803,6 @@ mmcpvr
 mmdv
 mmgh
 mmgo
-mmh
 mmix
 mmks
 mmkz
@@ -2032,7 +2029,6 @@ nsps
 nsr
 nssth
 nsstl
-nsstn
 nsv
 ntd
 ntf
@@ -2196,7 +2192,6 @@ pjk
 pjl
 pjw
 pkc
-pkjd
 pkpd
 pla
 plb
@@ -2288,7 +2283,6 @@ qrda
 qrdc
 qrdd
 qrdf
-qrvr
 queen
 qvg
 qxl
@@ -2675,7 +2669,6 @@ sups
 svdvd
 svmm
 svod
-svoks
 svomn
 svs
 svv
@@ -2767,7 +2760,6 @@ tkrm
 tksh
 tksl
 tkt
-tkwa
 tls
 tlz
 tma
