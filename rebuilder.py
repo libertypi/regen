@@ -402,6 +402,10 @@ class Analyzer:
     def __init__(self, report_dir: Path, regex_file: Path, scraper: MteamScraper) -> None:
 
         self.av_matcher = re.compile(regex_file.read_text(encoding="utf-8").strip()).search
+        self.video_filter = re.compile(
+            r"\.(?:3gp|asf|avi|bdmv|flv|iso|m(?:2?ts|4p|[24kop]v|p2|p4|pe?g|xf)|rm|rmvb|ts|vob|webm|wmv)$",
+            flags=re.M,
+        ).search
 
         report_dir.mkdir(parents=True, exist_ok=True)
         self.report_dir = report_dir
@@ -417,7 +421,6 @@ class Analyzer:
         total = unmatched = 0
         sep = "-" * 80 + "\n"
 
-        self.isvideo = re.compile(r"\.(?:mp4|wmv|avi|mkv|iso|m2ts)$", flags=re.M).search
         prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]?)?\b").search
         word_finder = re.compile(r"(?!\d+\b)\w{3,}").findall
 
@@ -518,15 +521,19 @@ class Analyzer:
         print(stat)
         print(f"Result saved to: {mismatched_file}")
 
-    def _match_av(self, path: Path) -> Tuple[str]:
+    def _match_av(self, path: Path) -> List[str]:
+        result = []
+        matcher = self.av_matcher
         with open(path, "r", encoding="utf-8") as f:
-            if not any(map(self.av_matcher, f)):
-                f.seek(0)
-                return tuple(filter(self.isvideo, f))
+            for v in filter(self.video_filter, f):
+                if matcher(v):
+                    return
+                result.append(v)
+        return result
 
     def _match_non_av(self, path: Path) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(m[0] for m in map(self.av_matcher, f) if m)
+            return tuple(m[0] for m in map(self.av_matcher, filter(self.video_filter, f)) if m)
 
     @staticmethod
     def _get_stat(name: str, total: int, n: int):
