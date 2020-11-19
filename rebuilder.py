@@ -14,7 +14,7 @@ from os import chdir
 from pathlib import Path
 from reprlib import repr as _repr
 from time import sleep
-from typing import Callable, Iterable, Iterator, List, Set, Tuple
+from typing import Callable, Iterable, Iterator, List, Set, Tuple, Optional
 from urllib.parse import urljoin
 
 import requests
@@ -66,7 +66,7 @@ class MteamScraper:
             )
 
         self._login()
-        pool = []
+        pool = set()
         with ThreadPoolExecutor(max_workers=None) as ex:
             for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, hi)):
                 for link in ft.result():
@@ -77,7 +77,7 @@ class MteamScraper:
                     if path.exists():
                         yield path
                     else:
-                        pool.append(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
+                        pool.add(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
             yield from filter(None, map(Future.result, as_completed(pool)))
 
     def _login(self):
@@ -521,7 +521,7 @@ class Analyzer:
         print(stat)
         print(f"Result saved to: {mismatched_file}")
 
-    def _match_av(self, path: Path) -> List[str]:
+    def _match_av(self, path: Path) -> Optional[List[str]]:
         result = []
         matcher = self.av_matcher
         with open(path, "r", encoding="utf-8") as f:
