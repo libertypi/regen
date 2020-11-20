@@ -66,7 +66,7 @@ class MteamScraper:
             )
 
         self._login()
-        pool = set()
+        pool = []
         with ThreadPoolExecutor(max_workers=None) as ex:
             for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, hi)):
                 for link in ft.result():
@@ -77,7 +77,7 @@ class MteamScraper:
                     if path.exists():
                         yield path
                     else:
-                        pool.add(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
+                        pool.append(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
             yield from filter(None, map(Future.result, as_completed(pool)))
 
     def _login(self):
