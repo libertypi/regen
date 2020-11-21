@@ -14,7 +14,7 @@ from os import chdir
 from pathlib import Path
 from reprlib import repr as _repr
 from time import sleep
-from typing import Callable, Iterable, Iterator, List, Set, Tuple, Optional
+from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
 from urllib.parse import urljoin
 
 import requests
@@ -345,7 +345,7 @@ class JavREBuilder:
                     pass
 
     @staticmethod
-    def _scrap_page(args: Tuple[str, Callable]) -> List[str]:
+    def _scrap_page(args: Tuple[str, etree.XPath]) -> List[str]:
 
         url, xpath = args
 

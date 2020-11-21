@@ -647,6 +647,7 @@ domd
 domm
 doms
 dopp
+dori
 dosa
 dosk
 dovr
@@ -1020,6 +1021,7 @@ gqr
 gqs
 grch
 grd
+gredb
 grgr
 grmo
 grmr
@@ -2140,7 +2142,6 @@ oppw
 oprd
 opsd
 opud
-opvr
 orbk
 ore
 orebms
@@ -2618,7 +2619,6 @@ sprm
 spro
 sps
 spsa
-spsh
 spz
 sqb
 sqis
@@ -2662,7 +2662,6 @@ stemaz
 stfx
 stko
 stm
-stol
 stph
 sttcd
 stv
@@ -2734,6 +2733,7 @@ tek
 tem
 ten
 tenk
+tenx
 tera
 tfvr
 tga
