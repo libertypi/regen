@@ -355,10 +355,8 @@ cdc
 cdrp
 cdrpbd
 cead
-cehd
 cele
 cen
-cend
 cent
 cesd
 cetd

@@ -432,11 +432,11 @@ class Analyzer:
         with ProcessPoolExecutor(max_workers=None) as ex, unmatch_raw.open("w", encoding="utf-8") as f:
 
             paths = self.scraper.run(page, lo, hi, is_av=True)
-            futures = as_completed(ex.submit(self._match_av, p) for p in paths)
 
-            for video in map(Future.result, futures):
+            for video in as_completed(ex.submit(self._match_av, p) for p in paths):
 
                 total += 1
+                video = video.result()
                 if not video:
                     continue
 
