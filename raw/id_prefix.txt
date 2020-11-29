@@ -1977,7 +1977,6 @@ ngd
 ngks
 ngm
 ngod
-ngvr
 nhd
 nhdt
 nhdta
