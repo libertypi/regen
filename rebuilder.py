@@ -18,7 +18,9 @@ from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
 from urllib.parse import urljoin
 
 import requests
-from lxml import etree, html
+from lxml.etree import XPath
+from lxml.html import HtmlElement, fromstring
+from requests.cookies import create_cookie
 from torrentool.api import Torrent
 from torrentool.exceptions import TorrentoolException
 
@@ -61,7 +63,7 @@ class MteamScraper:
         if cjk_only:
             parser = self._make_cjk_parser()
         else:
-            parser = etree.XPath(
+            parser = XPath(
                 '//form[@id="form_torrent"]//table[@class="torrentname"]//a[contains(@href, "download.php")]/@href'
             )
 
@@ -101,8 +103,8 @@ class MteamScraper:
     @staticmethod
     def _make_cjk_parser():
         table_path = './/form[@id="form_torrent"]//table[@class="torrentname"]'
-        title_xp = etree.XPath('(.//a[contains(@href, "details.php")]/@title)[1]')
-        link_xp = etree.XPath('(.//a[contains(@href, "download.php")]/@href)[1]')
+        title_xp = XPath('(.//a[contains(@href, "details.php")]/@title)[1]')
+        link_xp = XPath('(.//a[contains(@href, "download.php")]/@href)[1]')
 
         cjk = 0
         for i, j in (
@@ -117,7 +119,7 @@ class MteamScraper:
         ):
             cjk |= (1 << j + 1) - (1 << i)
 
-        def _parser(tree: html.HtmlElement) -> List[str]:
+        def _parser(tree: HtmlElement) -> List[str]:
             result = []
             for table in tree.iterfind(table_path):
                 try:
@@ -141,7 +143,7 @@ class MteamScraper:
                     raise
                 sleep(1)
             else:
-                return parser(html.fromstring(r.content))
+                return parser(fromstring(r.content))
 
     @staticmethod
     def _download(link: str, path: Path) -> Path:
@@ -276,9 +278,8 @@ class JavREBuilder:
     def _web_scrape(self) -> Set[str]:
 
         result = set(self._scrape_mteam())
-        result.update(self._normalize_id(self._scrape_javbus()))
-        result.update(self._normalize_id(self._scrape_javdb()))
-        result.update(self._normalize_id(self._scrape_github()))
+        for func in (self._scrape_javbus, self._scrape_javdb, self._scrape_github):
+            result.update(self._normalize_id(func()))
 
         uniq_id = len(result)
         prefix_counter = Counter(map(itemgetter(0), result))
@@ -311,7 +312,7 @@ class JavREBuilder:
     def _scrape_javbus(cls) -> Iterator[str]:
 
         print("Scanning javbus...")
-        xpath = etree.XPath('//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()')
+        xpath = XPath('//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()')
         step = 500
 
         with ThreadPoolExecutor(max_workers=None) as ex:
@@ -333,7 +334,7 @@ class JavREBuilder:
     def _scrape_javdb(cls) -> Iterator[str]:
 
         print(f"Scanning javdb...")
-        xpath = etree.XPath('//*[@id="videos"]//a/div[@class="uid"]/text()')
+        xpath = XPath('//div[@id="videos"]//a/div[@class="uid"]/text()')
         args = ((f"https://javdb.com/{p}?page={i}", xpath) for p in ("uncensored", "") for i in range(1, 81))
 
         with ThreadPoolExecutor(max_workers=3) as ex:
@@ -345,7 +346,7 @@ class JavREBuilder:
                     pass
 
     @staticmethod
-    def _scrap_page(args: Tuple[str, etree.XPath]) -> List[str]:
+    def _scrap_page(args: Tuple[str, XPath]) -> List[str]:
 
         url, xpath = args
 
@@ -359,7 +360,7 @@ class JavREBuilder:
             except requests.RequestException:
                 pass
             else:
-                return xpath(html.fromstring(res.content))
+                return xpath(fromstring(res.content))
             sleep(1)
 
         raise requests.RequestException(f"Connection error: {url}")
@@ -637,7 +638,7 @@ def load_session(session_file):
 
     except (OSError, pickle.PickleError, ValueError):
         s = requests.Session()
-        s.cookies.set_cookie(requests.cookies.create_cookie(domain="www.javbus.com", name="existmag", value="all"))
+        s.cookies.set_cookie(create_cookie(domain="www.javbus.com", name="existmag", value="all"))
         s.headers.update(
             {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"}
         )
