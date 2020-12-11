@@ -8,7 +8,7 @@ import sys
 from collections import Counter, defaultdict
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from configparser import ConfigParser
-from itertools import chain, filterfalse
+from itertools import chain, filterfalse, repeat
 from operator import itemgetter
 from os import chdir
 from pathlib import Path
@@ -64,7 +64,8 @@ class MteamScraper:
             parser = self._make_cjk_parser()
         else:
             parser = XPath(
-                '//form[@id="form_torrent"]//table[@class="torrentname"]//a[contains(@href, "download.php")]/@href'
+                '//form[@id = "form_torrent"]//table[@class = "torrentname"]'
+                '//a[contains(@href, "download.php")]/@href'
             )
 
         self._login()
@@ -322,9 +323,9 @@ class JavREBuilder:
 
                 while True:
                     print(f"{idx}:{idx+step}...", end="", flush=True)
-                    args = ((f"https://www.javbus.com/{base}/{i}", xpath) for i in range(idx, idx + step))
+                    urls = (f"https://www.javbus.com/{base}/{i}" for i in range(idx, idx + step))
                     try:
-                        yield from chain.from_iterable(ex.map(cls._scrap_page, args))
+                        yield from chain.from_iterable(ex.map(cls._scrap_page, urls, repeat(xpath)))
                     except LastPageReached:
                         break
                     idx += step
@@ -335,10 +336,13 @@ class JavREBuilder:
 
         print(f"Scanning javdb...")
         xpath = XPath('//div[@id="videos"]//a/div[@class="uid"]/text()')
-        args = ((f"https://javdb.com/{p}?page={i}", xpath) for p in ("uncensored", "") for i in range(1, 81))
 
         with ThreadPoolExecutor(max_workers=3) as ex:
-            for future in as_completed(ex.submit(cls._scrap_page, i) for i in args):
+            for future in as_completed(
+                ex.submit(cls._scrap_page, f"https://javdb.com/{p}?page={i}", xpath)
+                for p in ("uncensored", "")
+                for i in range(1, 81)
+            ):
                 try:
                     for i in future.result():
                         yield i
@@ -346,9 +350,7 @@ class JavREBuilder:
                     pass
 
     @staticmethod
-    def _scrap_page(args: Tuple[str, XPath]) -> List[str]:
-
-        url, xpath = args
+    def _scrap_page(url: str, xpath: XPath) -> List[str]:
 
         for _ in range(3):
             try:

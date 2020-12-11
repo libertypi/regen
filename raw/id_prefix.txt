@@ -159,6 +159,7 @@ av9898
 avd
 avgl
 avgp
+avhd
 avkh
 avop
 avopvr
@@ -422,6 +423,7 @@ cos
 cosq
 cosu
 cosvr
+cosx
 cov
 cowp
 cpcp
@@ -442,6 +444,7 @@ crz
 csbe
 csct
 csd
+csdx
 cst
 csv
 ctd
@@ -835,6 +838,7 @@ fajs
 fax
 fbs
 fcdc
+fcdss
 fch
 fctd
 fcu
@@ -975,6 +979,7 @@ ght
 gifd
 gigb
 gigl
+gigp
 gigr
 gihhd
 gihj
@@ -1093,7 +1098,6 @@ hez
 hfd
 hgj
 hgot
-hgp
 hgq
 hgs
 hgsd
@@ -1798,6 +1802,7 @@ mkop
 mksb
 mksd
 mkz
+mla
 mldo
 mlh
 mlid
@@ -2941,7 +2946,6 @@ vic
 vicd
 vida
 vikg
-vip
 vipd
 vipr
 virn
@@ -2960,6 +2964,7 @@ voss
 vov
 vovr
 vovs
+vpc
 vrab
 vrcand
 vreds
