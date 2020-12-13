@@ -64,8 +64,7 @@ class MteamScraper:
             parser = self._make_cjk_parser()
         else:
             parser = XPath(
-                './/form[@id = "form_torrent"]//table[@class = "torrentname"]'
-                '//a[contains(@href, "download.php")]/@href'
+                './/form[@id="form_torrent"]//table[@class="torrentname"]//a/@href[contains(.,"download.php")]'
             )
 
         self._login()
@@ -74,8 +73,8 @@ class MteamScraper:
             for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, hi)):
                 for link in ft.result():
                     try:
-                        path = subdir.joinpath(id_searcher(link).expand(r"\1.txt"))
-                    except AttributeError:
+                        path = subdir.joinpath(id_searcher(link)[1] + ".txt")
+                    except TypeError:
                         continue
                     if path.exists():
                         yield path
@@ -105,7 +104,7 @@ class MteamScraper:
     def _make_cjk_parser():
         table_path = './/form[@id="form_torrent"]//table[@class="torrentname"]'
         title_xp = XPath('(.//a[contains(@href, "details.php")]/@title)[1]')
-        link_xp = XPath('(.//a[contains(@href, "download.php")]/@href)[1]')
+        link_xp = XPath('(.//a/@href[contains(.,"download.php")])[1]')
 
         cjk = 0
         for i, j in (
@@ -184,6 +183,7 @@ class MteamScraper:
 
             except (subprocess.CalledProcessError, ValueError, OSError):
                 print(f'Parsing torrent error: "{link}"')
+                path.unlink(missing_ok=True)
                 return
 
             finally:
@@ -233,7 +233,7 @@ class JavREBuilder:
             print("Generating regex failed.")
             return
 
-        self.regex = f"(^|[^a-z0-9])({kw_regex}|[0-9]{{,3}}{prefix_regex}[ _-]?[0-9]{{2,6}})([^a-z0-9]|$)"
+        self.regex = f"(^|[^a-z0-9])({kw_regex}|[0-9]{{,3}}{prefix_regex}[ _-]?0*[0-9]{{2,6}})([^a-z0-9]|$)"
         return self._update_file(self.output_file, lambda _: (self.regex,))[0]
 
     @staticmethod
@@ -300,7 +300,7 @@ class JavREBuilder:
         print("Scanning mteam...")
 
         matcher = re.compile(
-            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[1-9]?)?\b.*\.(?:mp4|wmv|avi|mkv|iso)$",
+            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[1-9]?)?\b.*?\.(?:mp4|wmv|avi|mkv|iso)$",
             flags=re.MULTILINE,
         ).search
 
@@ -335,7 +335,7 @@ class JavREBuilder:
     def _scrape_javdb(cls) -> Iterator[str]:
 
         print(f"Scanning javdb...")
-        xpath = XPath('.//div[@id="videos"]//a/div[@class="uid"]/text()')
+        xpath = XPath('.//div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()')
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             for future in as_completed(

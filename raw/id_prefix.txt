@@ -155,7 +155,6 @@ atvr
 aukb
 aukg
 auks
-av9898
 avd
 avgl
 avgp
@@ -1109,7 +1108,6 @@ hhgt
 hhh
 hhk
 hhkl
-hhoy
 hhpr
 hib
 high
@@ -1132,7 +1130,6 @@ hjo
 hjt
 hjv
 hkd
-hkeg
 hkhs
 hkj
 hkm
@@ -2500,6 +2497,7 @@ sfx
 sga
 sgb
 sgcrs
+sgk
 sgm
 sgms
 sgoms
