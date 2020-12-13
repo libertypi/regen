@@ -64,7 +64,7 @@ class MteamScraper:
             parser = self._make_cjk_parser()
         else:
             parser = XPath(
-                '//form[@id = "form_torrent"]//table[@class = "torrentname"]'
+                './/form[@id = "form_torrent"]//table[@class = "torrentname"]'
                 '//a[contains(@href, "download.php")]/@href'
             )
 
@@ -313,7 +313,7 @@ class JavREBuilder:
     def _scrape_javbus(cls) -> Iterator[str]:
 
         print("Scanning javbus...")
-        xpath = XPath('//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()')
+        xpath = XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()')
         step = 500
 
         with ThreadPoolExecutor(max_workers=None) as ex:
@@ -335,7 +335,7 @@ class JavREBuilder:
     def _scrape_javdb(cls) -> Iterator[str]:
 
         print(f"Scanning javdb...")
-        xpath = XPath('//div[@id="videos"]//a/div[@class="uid"]/text()')
+        xpath = XPath('.//div[@id="videos"]//a/div[@class="uid"]/text()')
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             for future in as_completed(
