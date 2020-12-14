@@ -12,7 +12,7 @@
 1000[ _-]?giri
 10mu(sume)?
 1pon(do)?
-[0-9]{,4}[a-z]{2,6}[ _-]*[0-9]{2,8}hhb[1-9]?
+[0-9]{,4}[a-z]{2,8}[ _-]*[0-9]{2,10}hhb[1-9]?
 [ch]0930
 all(anal|finegirls|over30|internal)
 als(scan|angels)

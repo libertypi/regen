@@ -136,7 +136,7 @@ class MteamScraper:
 
         for retry in range(3):
             try:
-                r = session.get(page, timeout=(7, 27), params={"page": n})
+                r = session.get(page, timeout=(7, 28), params={"page": n})
                 r.raise_for_status()
             except requests.RequestException:
                 if retry == 2:
@@ -152,7 +152,7 @@ class MteamScraper:
 
         for _ in range(3):
             try:
-                content = session.get(link, timeout=(7, 27)).content
+                content = session.get(link, timeout=(7, 28)).content
             except (requests.RequestException, AttributeError):
                 sleep(1)
             else:
@@ -354,7 +354,7 @@ class JavREBuilder:
 
         for _ in range(3):
             try:
-                res = session.get(url, timeout=(7, 27))
+                res = session.get(url, timeout=(7, 28))
                 res.raise_for_status()
             except requests.HTTPError as e:
                 if e.response.status_code == 404:
@@ -375,7 +375,7 @@ class JavREBuilder:
 
         for retry in range(3):
             try:
-                return session.get(url, timeout=(7, 27)).json()
+                return session.get(url, timeout=(7, 28)).json()
             except requests.RequestException:
                 if retry == 2:
                     raise
