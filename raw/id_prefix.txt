@@ -8,6 +8,7 @@ aavm
 abba
 abc
 abcb
+abd
 abev
 abf
 abg
@@ -242,7 +243,6 @@ bkbk
 bkc
 bkd
 bkkg
-bkld
 bkoh
 bksp
 blb
@@ -419,6 +419,7 @@ corb
 core
 cori
 cos
+cosdokia
 cosq
 cosu
 cosvr
@@ -428,6 +429,7 @@ cowp
 cpcp
 cpd
 cpde
+cpm
 cpn
 crad
 crc
@@ -491,6 +493,7 @@ davk
 daya
 dayd
 dazd
+dbd
 dbdr
 dbe
 dbeb
@@ -544,6 +547,7 @@ dfet
 dfgr
 dfrd
 dfslv
+dfsmmrab
 dfta
 dftr
 dgcesd
@@ -804,7 +808,6 @@ esk
 etc
 etemb
 etqr
-etqt
 etvco
 etvtm
 euud
@@ -856,6 +859,7 @@ fffd
 fffs
 fgan
 finh
+fis
 fiv
 fjl
 fkt
@@ -1011,6 +1015,7 @@ godr
 goju
 goku
 gold
+golu
 gomk
 gon
 gone
@@ -1046,6 +1051,7 @@ gtj
 gtrl
 guild
 gun
+gunm
 gur
 gva
 gvg
@@ -1086,7 +1092,6 @@ herd
 herg
 heri
 herr
-herv
 herw
 herx
 hery
@@ -1152,6 +1157,7 @@ hnjc
 hnm
 hnvr
 hobd
+hoc
 hocl
 hodv
 hoi
@@ -1301,7 +1307,6 @@ jda
 jdl
 jelly
 jfb
-jfd
 jfe
 jfyg
 jgad
@@ -1432,7 +1437,6 @@ kil
 kimu
 kir
 kira
-kiray
 kird
 kire
 kiri
@@ -1550,6 +1554,7 @@ laf
 lafbd
 laim
 laka
+lals
 lamf
 lank
 las
@@ -1653,7 +1658,6 @@ mast
 matu
 maxd
 maxvr
-maxvrg
 maxvrh
 mazj
 mbd
@@ -2054,14 +2058,17 @@ nubi
 nuka
 nukimax
 numa
+nure
 nvs
 nwf
 nwjk
 nxg
 nyh
 nykd
+nyog
 nzk
 oae
+oam
 oba
 obal
 obc
@@ -2509,7 +2516,6 @@ sgv
 sha
 shbs
 shd
-she
 shed
 shh
 shibp
@@ -2742,7 +2748,6 @@ ten
 tenk
 tenx
 tera
-tfvr
 tga
 tgav
 tgbe
@@ -2799,6 +2804,7 @@ tmgk
 tmhk
 tmhp
 tmik
+tmrd
 tms
 tmsb
 tmvi
@@ -2824,6 +2830,7 @@ torx
 tos
 tot
 totte
+totugeki
 tou
 tpd
 tph
@@ -2896,6 +2903,7 @@ umd
 umso
 uncp
 und
+upsa
 upsm
 uquv
 urab
@@ -3024,6 +3032,7 @@ wpvr
 wrc
 wrg
 wsd
+wse
 wshd
 wsp
 wss
@@ -3099,6 +3108,7 @@ zet
 zeusf
 zevr
 zex
+zht
 zizg
 zkwd
 zld

@@ -70,39 +70,36 @@ class MteamScraper:
         self._login()
         pool = []
         with ThreadPoolExecutor(max_workers=None) as ex:
-            for ft in as_completed(ex.submit(self._get_link, page, i, parser) for i in range(lo, hi)):
-                for link in ft.result():
-                    try:
-                        path = subdir.joinpath(id_searcher(link)[1] + ".txt")
-                    except TypeError:
-                        continue
-                    if path.exists():
-                        yield path
-                    else:
-                        pool.append(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
+
+            print("Scanning MTeam...", end="", flush=True)
+            futures = as_completed(ex.submit(self._scan_page, page, i, parser) for i in range(lo, hi))
+
+            for link in chain.from_iterable(map(Future.result, futures)):
+                try:
+                    path = subdir.joinpath(id_searcher(link)[1] + ".txt")
+                except TypeError:
+                    continue
+                if path.exists():
+                    yield path
+                else:
+                    pool.append(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
+            print("ok.")
+
             yield from filter(None, map(Future.result, as_completed(pool)))
 
     def _login(self):
-        for retry in range(3):
-            try:
-                res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
-                res.raise_for_status()
-                if "/login.php" in res.url:
-                    session.post(
-                        url=f"{self.DOMAIN}/takelogin.php",
-                        data={"username": self._account[0], "password": self._account[1]},
-                        headers={"referer": f"{self.DOMAIN}/login.php"},
-                    )
-            except requests.RequestException:
-                if retry == 2:
-                    raise
-                sleep(1)
-            else:
-                return
+        res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
+        res.raise_for_status()
+        if "/login.php" in res.url:
+            res = session.post(
+                url=self.DOMAIN + "takelogin.php",
+                data={"username": self._account[0], "password": self._account[1]},
+                headers={"referer": self.DOMAIN + "login.php"},
+            )
+            res.raise_for_status()
 
     @staticmethod
     def _make_cjk_parser():
-        table_path = './/form[@id="form_torrent"]//table[@class="torrentname"]'
         title_xp = XPath('(.//a[contains(@href, "details.php")]/@title)[1]')
         link_xp = XPath('(.//a/@href[contains(.,"download.php")])[1]')
 
@@ -121,7 +118,7 @@ class MteamScraper:
 
         def _parser(tree: HtmlElement) -> List[str]:
             result = []
-            for table in tree.iterfind(table_path):
+            for table in tree.iterfind('.//form[@id="form_torrent"]//table[@class="torrentname"]'):
                 try:
                     if any(1 << ord(c) & cjk for c in title_xp(table)[0]):
                         result.append(link_xp(table)[0])
@@ -132,7 +129,10 @@ class MteamScraper:
         return _parser
 
     @staticmethod
-    def _get_link(page: str, n: int, parser: Callable) -> List[str]:
+    def _scan_page(page: str, n: int, parser: Callable) -> List[str]:
+
+        if not n % 100:
+            print(f"{n}...", end="", flush=True)
 
         for retry in range(3):
             try:
@@ -152,13 +152,15 @@ class MteamScraper:
 
         for _ in range(3):
             try:
-                content = session.get(link, timeout=(7, 28)).content
-            except (requests.RequestException, AttributeError):
+                content = session.get(link, timeout=(7, 28))
+                content.raise_for_status()
+            except requests.RequestException:
                 sleep(1)
             else:
+                content = content.content
                 break
         else:
-            print(f"Downloading torrent failed: {link}")
+            print(f"Downloading failed: {link}")
             return
 
         try:
@@ -291,16 +293,14 @@ class JavREBuilder:
 
     @staticmethod
     def _normalize_id(wordlist: Iterable[str]) -> Iterator[Tuple[str, str]]:
-        matcher = re.compile(r"\s*([a-z]{3,7})[ _-]?0*([0-9]{2,6})\s*")
+        matcher = re.compile(r"\s*([a-z]{3,8})[ _-]?0*([0-9]{2,6})\s*")
         for m in filter(None, map(matcher.fullmatch, map(str.lower, wordlist))):
             yield m.group(1, 2)
 
     def _scrape_mteam(self) -> Iterator[Tuple[str, str]]:
 
-        print("Scanning mteam...")
-
         matcher = re.compile(
-            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[1-9]?)?\b.*?\.(?:mp4|wmv|avi|mkv|iso)$",
+            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[0-9]*)?\b.*?\.(?:mp4|wmv|avi|mkv|iso)$",
             flags=re.MULTILINE,
         ).search
 
@@ -414,17 +414,16 @@ class Analyzer:
         self.report_dir = report_dir
         self.scraper = scraper
 
-    def analyze_av(self, lo: int, hi: int):
+    def analyze_av(self, page: str, lo: int, hi: int):
 
         print("Matching test begins...")
 
-        page = "adult.php"
         unmatch_raw = self.report_dir.joinpath("unmatch_raw.txt")
         unmatch_freq = self.report_dir.joinpath("unmatch_frequency.txt")
         total = unmatched = 0
         sep = "-" * 80 + "\n"
 
-        prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]?)?\b").search
+        prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]*)?\b").search
         word_finder = re.compile(r"(?!\d+\b)\w{3,}").findall
 
         flat_counter = defaultdict(list)
@@ -479,11 +478,10 @@ class Analyzer:
         print(stat)
         print(f"Result saved to: {unmatch_freq}")
 
-    def analyze_non_av(self, lo: int, hi: int):
+    def analyze_non_av(self, page: str, lo: int, hi: int):
 
         print("Mismatch testing begins...")
 
-        page = "torrents.php"
         mismatched_file = self.report_dir.joinpath("mismatch_frequency.txt")
         word_searcher = re.compile(r"[a-z]+").search
         total = mismatched = 0
@@ -561,7 +559,8 @@ def parse_config(configfile: str):
         "cache_dir": "",
         "mteam_username": "",
         "mteam_password": "",
-        "mteam_page": "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
+        "mteam_av_page": "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
+        "mteam_non_av_page": "torrents.php",
         "mteam_limit": "500",
     }
 
@@ -658,7 +657,7 @@ def main():
 
     chdir(Path(__file__).parent)
 
-    config = parse_config("rebuilder.ini")
+    config = parse_config("builder.ini")
     args = parse_arguments()
 
     raw_dir = Path("raw")
@@ -679,7 +678,7 @@ def main():
             output_file=output_file,
             raw_dir=raw_dir,
             mteam_scraper=mteam_scraper,
-            mteam_page=config["mteam_page"],
+            mteam_page=config["mteam_av_page"],
             mteam_limit=config.getint("mteam_limit") or 500,
             fetch=args.fetch,
         ).run()
@@ -697,9 +696,9 @@ def main():
         )
 
         if args.mode == "test_match":
-            analyzer.analyze_av(*args.range)
+            analyzer.analyze_av(config["mteam_av_page"], *args.range)
         else:
-            analyzer.analyze_non_av(*args.range)
+            analyzer.analyze_non_av(config["mteam_non_av_page"], *args.range)
 
     save_session(session_file)
 
