@@ -231,7 +231,6 @@ bhsp
 bib
 bic
 bid
-big
 bij
 bijc
 bijn
@@ -253,7 +252,6 @@ blkw
 blmc
 blo
 blor
-blue
 bmay
 bmc
 bmd
@@ -1558,7 +1556,6 @@ laka
 lals
 lamf
 lank
-las
 lase
 lata
 lboy
@@ -2190,7 +2187,6 @@ pcde
 pdv
 pdx
 pdz
-per
 pet
 peworld
 pfck

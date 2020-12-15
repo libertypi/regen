@@ -8,7 +8,7 @@ import sys
 from collections import Counter, defaultdict
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from configparser import ConfigParser
-from itertools import chain, filterfalse, repeat
+from itertools import chain, filterfalse, islice, repeat
 from operator import itemgetter
 from os import chdir
 from pathlib import Path
@@ -313,10 +313,24 @@ class JavREBuilder:
             flags=re.MULTILINE | re.VERBOSE,
         ).search
 
+        try:
+            freq_words = session.get(
+                "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+            )
+            freq_words.raise_for_status()
+            freq_words = frozenset(
+                m[0].lower() for m in islice(re.finditer(r"^[A-Za-z]{3,6}$", freq_words.text, flags=re.M), 1000)
+            )
+            assert len(freq_words) == 1000
+        except (requests.RequestException, AssertionError) as e:
+            print(f"Warning: fetching frequent words failed: {e}")
+            freq_words = ()
+
         for path in self.mteam_scrape:
             with open(path, "r", encoding="utf-8") as f:
                 for m in filter(None, map(matcher, f)):
-                    yield m.group(1, 3)
+                    if m[1] not in freq_words:
+                        yield m.group(1, 3)
 
     @classmethod
     def _scrape_javbus(cls) -> Iterator[str]:
