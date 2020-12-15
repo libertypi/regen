@@ -1,3 +1,4 @@
+abc
 air
 amd
 and
@@ -9,14 +10,18 @@ day
 diy
 dvd
 girl
+good
+hit
 img
 ink
 jan
+kid
 king
 line
 love
 man
 new
+next
 one
 rain
 room

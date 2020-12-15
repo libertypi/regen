@@ -6,7 +6,6 @@ aak
 aao
 aavm
 abba
-abc
 abcb
 abd
 abev
@@ -1017,7 +1016,6 @@ golu
 gomk
 gon
 gone
-good
 gopj
 gorilla
 gotv
@@ -1122,7 +1120,6 @@ hind
 hint
 his
 hisn
-hit
 hitj
 hitma
 hiz
@@ -1430,7 +1427,6 @@ kgdv
 khc
 khom
 kibd
-kid
 kifd
 kil
 kimu
@@ -1973,7 +1969,6 @@ ned
 nem
 neo
 neob
-next
 nextc
 nextg
 nexts
