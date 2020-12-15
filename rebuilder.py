@@ -49,19 +49,20 @@ class JavBusScraper:
 
         with ThreadPoolExecutor(max_workers=None) as ex:
             for base in ("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"):
-                idx = 1
+                lo = 1
                 print(f"  /{base}: ", end="", flush=True)
 
                 while True:
-                    print(f"{idx}:{idx+step}...", end="", flush=True)
-                    urls = (f"https://www.javbus.com/{base}/{i}" for i in range(idx, idx + step))
+                    hi = lo + step
+                    print(f"{lo}:{hi}...", end="", flush=True)
+                    urls = (f"https://www.javbus.com/{base}/{i}" for i in range(lo, hi))
 
                     try:
                         yield from chain.from_iterable(ex.map(_request_map, urls, repeat(xp), repeat(True)))
                     except LastPageReached:
                         break
 
-                    idx += step
+                    lo = hi
 
                 print()
 
@@ -365,10 +366,10 @@ class Analyzer:
         self._fetch = fetch
 
         regex = Path(regex_file).read_text(encoding="utf-8").strip()
-        assert len(regex.splitlines()) == 1, "regex file should contains only one line"
+        assert len(regex.splitlines()) == 1, "regex file should contain only one line"
 
         p = re.fullmatch(r"(.+?)\((.+)", regex)
-        self._av_matcher = re.compile(f"{p[1]}(?P<match>{p[2]}", flags=re.MULTILINE).search
+        self._av_matcher = re.compile(f"{p[1]}(?P<match>{p[2]}", flags=re.M).search
 
         self._video_filter = re.compile(
             r"\.(?:3gp|asf|avi|bdmv|flv|iso|m(?:2?ts|4p|[24kop]v|p2|p4|pe?g|xf)|rm|rmvb|ts|vob|webm|wmv)$",
@@ -421,10 +422,15 @@ class Analyzer:
                 tmp.clear()
 
         stat = self._get_stat("Match", total, total - unmatched)
-        result = [(i, len(v), k, set(v)) for k, v in flat_counter.items() if (i := prefix_counter[k]) >= _THRESH]
+        freq_words = get_freq_words()
+
+        result = [
+            (i, len(v), k, set(v))
+            for k, v in flat_counter.items()
+            if k not in freq_words and (i := prefix_counter[k]) >= _THRESH
+        ]
         result.sort(reverse=True)
 
-        freq_words = get_freq_words()
         words = [(v, k) for k, v in word_counter.items() if k not in freq_words and v >= _THRESH]
         words.sort(reverse=True)
 
@@ -516,7 +522,7 @@ def _request(url: str, **kwargs):
         try:
             res = session.get(url, timeout=(7, 28), **kwargs)
             res.raise_for_status()
-        except RequestException as e:
+        except RequestException:
             if retry == 2:
                 raise
             sleep(1)
@@ -543,7 +549,7 @@ def _request_map(url: str, func: Callable, raise_404: bool = False, **kwargs):
 _freq_words = None
 
 
-def get_freq_words(n: int = 1000):
+def get_freq_words(lb: int = 3, ub: int = 6, n: int = 1000):
 
     global _freq_words
 
@@ -552,7 +558,7 @@ def get_freq_words(n: int = 1000):
             "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
         ).text
         _freq_words = frozenset(
-            m[0].lower() for m in islice(re.finditer(r"^[A-Za-z]{3,6}$", word_list, flags=re.M), n)
+            m[0].lower() for m in islice(re.finditer(f"^[A-Za-z]{{{lb},{ub}}}$", word_list, flags=re.M), n)
         )
         assert len(_freq_words) == n, "fetching frequent words failed"
 
