@@ -69,10 +69,13 @@ class MteamScraper:
 
         self._login()
         pool = []
+
+        if lo:
+            print(f"Scanning MTeam...{lo}")
+
         with ThreadPoolExecutor(max_workers=None) as ex:
 
-            print("Scanning MTeam...", end="", flush=True)
-            futures = as_completed(ex.submit(self._scan_page, page, i, parser) for i in range(lo, hi))
+            futures = as_completed(ex.submit(self._scan_page, page, i, parser) for i in range(lo, hi + 1))
 
             for link in chain.from_iterable(map(Future.result, futures)):
                 try:
@@ -83,7 +86,6 @@ class MteamScraper:
                     yield path
                 else:
                     pool.append(ex.submit(self._download, urljoin(self.DOMAIN, link), path))
-            print("ok.")
 
             yield from filter(None, map(Future.result, as_completed(pool)))
 
@@ -132,7 +134,7 @@ class MteamScraper:
     def _scan_page(page: str, n: int, parser: Callable) -> List[str]:
 
         if not n % 100:
-            print(f"{n}...", end="", flush=True)
+            print(f"Scanning MTeam...{n}")
 
         for retry in range(3):
             try:
@@ -235,7 +237,7 @@ class JavREBuilder:
             print("Generating regex failed.")
             return
 
-        self.regex = f"(^|[^a-z0-9])({kw_regex}|[0-9]{{,3}}{prefix_regex}[ _-]?0*[0-9]{{2,6}})([^a-z0-9]|$)"
+        self.regex = f"(^|[^a-z0-9])({kw_regex}|[0-9]{{,3}}{prefix_regex}[ _-]?[0-9]{{2,8}})([^a-z0-9]|$)"
         return self._update_file(self.output_file, lambda _: (self.regex,))[0]
 
     @staticmethod
@@ -293,21 +295,28 @@ class JavREBuilder:
 
     @staticmethod
     def _normalize_id(wordlist: Iterable[str]) -> Iterator[Tuple[str, str]]:
-        matcher = re.compile(r"\s*([a-z]{3,8})[ _-]?0*([0-9]{2,6})\s*")
+        matcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*")
         for m in filter(None, map(matcher.fullmatch, map(str.lower, wordlist))):
             yield m.group(1, 2)
 
     def _scrape_mteam(self) -> Iterator[Tuple[str, str]]:
 
         matcher = re.compile(
-            r"(?:^|/)(?:[0-9]{3})?([a-z]{3,6})-0*([0-9]{2,4})(?:hhb[0-9]*)?\b.*?\.(?:mp4|wmv|avi|mkv|iso)$",
-            flags=re.MULTILINE,
+            r"""
+            (?:^|/)(?:[0-9]{3})?
+            ([a-z]{3,6})
+            (-)?
+            0*([1-9][0-9]{,3})
+            (?(2)(?:hhb[0-9]*)?|hhb[0-9]*)
+            \b.*?\.(?:mp4|wmv|avi|mkv|iso)$
+            """,
+            flags=re.MULTILINE | re.VERBOSE,
         ).search
 
         for path in self.mteam_scrape:
             with open(path, "r", encoding="utf-8") as f:
                 for m in filter(None, map(matcher, f)):
-                    yield m.group(1, 2)
+                    yield m.group(1, 3)
 
     @classmethod
     def _scrape_javbus(cls) -> Iterator[str]:
@@ -423,7 +432,7 @@ class Analyzer:
         total = unmatched = 0
         sep = "-" * 80 + "\n"
 
-        prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})[ _-]?[0-9]{2,6}(?:hhb[0-9]*)?\b").search
+        prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:hhb[0-9]*)?\b").search
         word_finder = re.compile(r"(?!\d+\b)\w{3,}").findall
 
         flat_counter = defaultdict(list)

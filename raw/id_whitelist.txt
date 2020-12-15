@@ -1,7 +1,6 @@
 ap
 bf
 cw3d2bd
-cw3d2d
 cw3d2dbd
 cwhdbd
 cz
@@ -14,9 +13,7 @@ gs
 isi
 kg
 kv
-mcb3d
 mcb3dbd
-mk3d2d
 mk3d2dbd
 mx
 pb
@@ -28,7 +25,6 @@ s2mbd
 s2mcr
 s3dbd
 sky237
-sm3d2d
 sm3d2dbd
 sw
 t28

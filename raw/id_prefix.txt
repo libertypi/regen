@@ -143,6 +143,7 @@ ata
 atad
 atf
 atfb
+atgo
 athb
 athh
 ati
@@ -456,7 +457,6 @@ cud
 cuhe
 cvdx
 cw3d2bd
-cw3d2d
 cw3d2dbd
 cwbj
 cwdv
@@ -1399,6 +1399,7 @@ kar
 katu
 kavr
 kawd
+kawofl
 kaz
 kazk
 kbdv
@@ -1679,7 +1680,6 @@ mbx
 mbyd
 mca
 mcas
-mcb3d
 mcb3dbd
 mcbd
 mcd
@@ -1791,7 +1791,6 @@ miya
 miz
 mizd
 mjd
-mk3d2d
 mk3d2dbd
 mkck
 mkd
@@ -2227,6 +2226,7 @@ pms
 pmsd
 pna
 pnch
+pnjm
 pnvi
 poka
 pokp
@@ -2411,7 +2411,6 @@ s3dbd
 sab
 saba
 sabe
-sacai
 sace
 sad
 sadt
@@ -2577,7 +2576,6 @@ slg
 slk
 slw
 slx
-sm3d2d
 sm3d2dbd
 sma
 smbd
@@ -2631,6 +2629,7 @@ spro
 sps
 spsa
 spsh
+spye
 spz
 sqb
 sqis
