@@ -8,7 +8,7 @@ import sys
 from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from configparser import ConfigParser
-from itertools import chain, filterfalse, islice, repeat
+from itertools import chain, filterfalse, islice
 from operator import itemgetter, methodcaller
 from os import chdir
 from pathlib import Path
@@ -44,7 +44,9 @@ class JavBusScraper:
     def _scrape() -> Iterator[str]:
 
         print("Scanning javbus...")
-        xp = XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()', smart_strings=False)
+        parser = XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()', smart_strings=False)
+        parser = _get_downloader(parser, raise_404=True)
+
         step = 500
 
         with ThreadPoolExecutor(max_workers=None) as ex:
@@ -58,7 +60,7 @@ class JavBusScraper:
                     urls = (f"https://www.javbus.com/{base}/{i}" for i in range(lo, hi))
 
                     try:
-                        yield from chain.from_iterable(ex.map(_request_map, urls, repeat(xp), repeat(True)))
+                        yield from chain.from_iterable(ex.map(parser, urls))
                     except LastPageReached:
                         break
 
@@ -72,12 +74,13 @@ class JavDBScraper(JavBusScraper):
     def _scrape() -> Iterator[str]:
 
         print(f"Scanning javdb...")
-        xp = XPath('.//div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()', smart_strings=False)
+        parser = XPath('.//div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()', smart_strings=False)
+        parser = _get_downloader(parser)
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
-                ex.submit(_request_map, f"https://javdb.com/{p}?page={i}", xp)
-                for p in ("uncensored", "")
+                ex.submit(parser, f"https://javdb.com/{base}?page={i}")
+                for base in ("uncensored", "")
                 for i in range(1, 81)
             )
             yield from chain.from_iterable(map(_result_caller, fts))
@@ -139,35 +142,35 @@ class MTeamScraper:
             return
 
         pool = []
-        page = urljoin(self.DOMAIN, self._pages[is_av])
-        matcher = re.compile(r"\bid=([0-9]+)").search
         joinpath = subdir.joinpath
+        matcher = re.compile(r"\bid=([0-9]+)").search
+        page = urljoin(self.DOMAIN, self._pages[is_av])
 
         if cjk_title_only:
             parser = self._get_cjk_parser()
         else:
             parser = XPath(
-                './/form[@id = "form_torrent"]'
-                '//table[@class = "torrentname"]//a/@href[contains(., "download.php")]',
+                './/form[@id="form_torrent"]//table[@class="torrentname"]'
+                '/descendant::a[contains(@href, "download.php?")][1]/@href',
                 smart_strings=False,
             )
+        parser = _get_downloader(parser)
 
         print(f"Scanning mteam... limit: {self._range.stop-1}")
         if not self._logined:
             self._login()
 
         with ThreadPoolExecutor(max_workers=None) as ex:
-            fts = as_completed(ex.submit(_request_map, page, parser, params={"page": i}) for i in self._range)
-            for link in chain.from_iterable(map(_result_caller, fts)):
-                try:
-                    path = joinpath(matcher(link)[1] + ".txt")
-                except TypeError:
-                    continue
-                if path.exists():
-                    yield path
-                else:
-                    pool.append(ex.submit(self._dl_torrent, urljoin(self.DOMAIN, link), path))
-
+            for ft in as_completed(ex.submit(parser, page, params={"page": i}) for i in self._range):
+                for link in ft.result():
+                    try:
+                        path = joinpath(matcher(link)[1] + ".txt")
+                    except TypeError:
+                        continue
+                    if path.exists():
+                        yield path
+                    else:
+                        pool.append(ex.submit(self._dl_torrent, urljoin(self.DOMAIN, link), path))
             yield from filter(None, map(_result_caller, as_completed(pool)))
 
     def _login(self):
@@ -184,8 +187,8 @@ class MTeamScraper:
 
     @staticmethod
     def _get_cjk_parser():
-        title_xp = XPath('(.//a[contains(@href, "details.php")]/@title)[1]', smart_strings=False)
-        link_xp = XPath('(.//a/@href[contains(.,"download.php")])[1]', smart_strings=False)
+        title_xp = XPath('(descendant::a[contains(@href, "details.php?")]//text())[1]', smart_strings=False)
+        link_xp = XPath('descendant::a[contains(@href, "download.php?")][1]/@href', smart_strings=False)
 
         cjk = 0
         for i, j in (
@@ -537,20 +540,22 @@ def _request(url: str, **kwargs):
             return res
 
 
-def _request_map(url: str, func: Callable, raise_404: bool = False, **kwargs):
+def _get_downloader(func: Callable[[HtmlElement], List[str]], raise_404: bool = False):
+    def downloader(url: str, **kwargs):
+        for retry in range(3):
+            try:
+                res = session.get(url, timeout=(7, 28), **kwargs)
+                res.raise_for_status()
+            except RequestException as e:
+                if raise_404 and isinstance(e, HTTPError) and e.response.status_code == 404:
+                    raise LastPageReached
+                if retry == 2:
+                    raise
+                sleep(1)
+            else:
+                return func(fromstring(res.content))
 
-    for retry in range(3):
-        try:
-            res = session.get(url, timeout=(7, 28), **kwargs)
-            res.raise_for_status()
-        except RequestException as e:
-            if raise_404 and isinstance(e, HTTPError) and e.response.status_code == 404:
-                raise LastPageReached
-            if retry == 2:
-                raise
-            sleep(1)
-        else:
-            return func(fromstring(res.content))
+    return downloader
 
 
 def get_freq_words(lb: int = 3, ub: int = 6, n: int = 1000):
