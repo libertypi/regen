@@ -27,7 +27,6 @@ from torrentool.exceptions import TorrentoolException
 from regenerator import Regen
 
 _THRESH = 5
-_result_caller = methodcaller("result")
 
 
 class LastPageReached(Exception):
@@ -83,7 +82,7 @@ class JavDBScraper(JavBusScraper):
                 for base in ("uncensored", "")
                 for i in range(1, 81)
             )
-            yield from chain.from_iterable(map(_result_caller, fts))
+            yield from chain.from_iterable(map(methodcaller("result"), fts))
 
 
 class GithubScraper(JavBusScraper):
@@ -129,7 +128,7 @@ class MTeamScraper:
                     if m[1] not in freq_words:
                         yield m.group(1, 3)
 
-    def get_path(self, is_av: bool, cjk_title_only: bool = False, fetch: bool = True) -> Iterator[Path]:
+    def get_path(self, is_av: bool, fetch: bool = True, cjk_title_only: bool = False) -> Iterator[Path]:
 
         subdir = self._cache_dir.joinpath("av" if is_av else "non_av")
         subdir.mkdir(parents=True, exist_ok=True)
@@ -144,7 +143,7 @@ class MTeamScraper:
         pool = []
         joinpath = subdir.joinpath
         matcher = re.compile(r"\bid=([0-9]+)").search
-        page = urljoin(self.DOMAIN, self._pages[is_av])
+        url = urljoin(self.DOMAIN, self._pages[is_av])
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
         if cjk_title_only:
             parser = self._get_cjk_parser()
@@ -161,7 +160,7 @@ class MTeamScraper:
             self._login()
 
         with ThreadPoolExecutor(max_workers=None) as ex:
-            fts = as_completed(ex.submit(parser, page, params={"page": i}) for i in range(1, self._limit + 1))
+            fts = as_completed(ex.submit(parser, url, params={"page": i}) for i in range(1, self._limit + 1))
             for i, ft in enumerate(fts, 1):
                 if not i % step:
                     if i <= self._limit - step:
@@ -177,7 +176,7 @@ class MTeamScraper:
                         yield path
                     else:
                         pool.append(ex.submit(self._dl_torrent, urljoin(self.DOMAIN, link), path))
-            yield from filter(None, map(_result_caller, as_completed(pool)))
+            yield from filter(None, map(methodcaller("result"), as_completed(pool)))
 
     def _login(self):
         res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
@@ -412,16 +411,10 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex, open(unmatch_raw, "w", encoding="utf-8") as f:
 
-            fts = as_completed(
-                ex.submit(self._match_av, file_list)
-                for file_list in self._mteam.get_path(is_av=True, fetch=self._fetch)
-            )
-
-            for video in map(_result_caller, fts):
+            for video in ex.map(self._match_av, self._mteam.get_path(True, self._fetch), chunksize=100):
 
                 total += 1
                 if video:
-
                     unmatched += 1
                     f.write(sep)
                     f.writelines(video)
@@ -479,23 +472,19 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex:
 
-            for ft in as_completed(
-                ex.submit(self._match_non_av, file_list)
-                for file_list in self._mteam.get_path(is_av=False, fetch=self._fetch)
-            ):
+            for video in ex.map(self._match_non_av, self._mteam.get_path(False, self._fetch), chunksize=100):
 
                 total += 1
-                for string in ft.result():
-                    try:
-                        word = word_searcher(string)[0]
-                    except TypeError:
-                        pass
-                    else:
+                if video:
+                    mismatched += 1
+                    for string in video:
+                        try:
+                            word = word_searcher(string)[0]
+                        except TypeError:
+                            word = string
                         flat_counter[word].append(string)
                         tmp.add(word)
 
-                if tmp:
-                    mismatched += 1
                     torrent_counter.update(tmp)
                     tmp.clear()
 
