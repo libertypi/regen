@@ -10,7 +10,7 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice
 from operator import itemgetter, methodcaller
-from os import chdir
+import os
 from pathlib import Path
 from reprlib import repr as _repr
 from time import sleep
@@ -105,7 +105,7 @@ class MTeamScraper:
         self._pages = (non_av_page, av_page)
         self._cache_dir = Path(cache_dir)
         self._account = account
-        self._range = range(1, limit + 1)
+        self._limit = limit
         self._logined = False
 
     def get_id(self) -> Iterator[Tuple[str, str]]:
@@ -117,7 +117,7 @@ class MTeamScraper:
             (-)?
             0*([1-9][0-9]{,3})
             (?(2)(?:hhb[0-9]*)?|hhb[0-9]*)
-            \b.*?\.(?:mp4|wmv|avi|mkv|iso)$
+            \b.*\.(?:mp4|wmv|avi|mkv|iso)$
             """,
             flags=re.MULTILINE | re.VERBOSE,
         ).search
@@ -145,7 +145,7 @@ class MTeamScraper:
         joinpath = subdir.joinpath
         matcher = re.compile(r"\bid=([0-9]+)").search
         page = urljoin(self.DOMAIN, self._pages[is_av])
-
+        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
         if cjk_title_only:
             parser = self._get_cjk_parser()
         else:
@@ -156,12 +156,18 @@ class MTeamScraper:
             )
         parser = _get_downloader(parser)
 
-        print(f"Scanning mteam... limit: {self._range.stop-1}")
+        print(f"Scanning mteam ({self._limit} pages)...", end="", flush=True)
         if not self._logined:
             self._login()
 
         with ThreadPoolExecutor(max_workers=None) as ex:
-            for ft in as_completed(ex.submit(parser, page, params={"page": i}) for i in self._range):
+            fts = as_completed(ex.submit(parser, page, params={"page": i}) for i in range(1, self._limit + 1))
+            for i, ft in enumerate(fts, 1):
+                if not i % step:
+                    if i <= self._limit - step:
+                        print(f"{i}..", end="", flush=True)
+                    else:
+                        print(f"{i}..{self._limit}")
                 for link in ft.result():
                     try:
                         path = joinpath(matcher(link)[1] + ".txt")
@@ -187,8 +193,14 @@ class MTeamScraper:
 
     @staticmethod
     def _get_cjk_parser():
-        title_xp = XPath('(descendant::a[contains(@href, "details.php?")]//text())[1]', smart_strings=False)
-        link_xp = XPath('descendant::a[contains(@href, "download.php?")][1]/@href', smart_strings=False)
+        title_xp = XPath(
+            'descendant::a[*//text() and contains(@href, "details.php?")][1]//text()',
+            smart_strings=False,
+        )
+        link_xp = XPath(
+            'descendant::a[contains(@href, "download.php?")][1]/@href',
+            smart_strings=False,
+        )
 
         cjk = 0
         for i, j in (
@@ -401,32 +413,31 @@ class Analyzer:
         with ProcessPoolExecutor(max_workers=None) as ex, open(unmatch_raw, "w", encoding="utf-8") as f:
 
             fts = as_completed(
-                ex.submit(self._match_av, torrent_path)
-                for torrent_path in self._mteam.get_path(is_av=True, fetch=self._fetch)
+                ex.submit(self._match_av, file_list)
+                for file_list in self._mteam.get_path(is_av=True, fetch=self._fetch)
             )
 
             for video in map(_result_caller, fts):
 
                 total += 1
-                if not video:
-                    continue
+                if video:
 
-                unmatched += 1
-                f.write(sep)
-                f.writelines(video)
-                f.write("\n")
+                    unmatched += 1
+                    f.write(sep)
+                    f.writelines(video)
+                    f.write("\n")
 
-                for m in filter(None, map(prefix_searcher, video)):
-                    prefix = m[1]
-                    flat_counter[prefix].append(m[0])
-                    tmp.add(prefix)
+                    for m in filter(None, map(prefix_searcher, video)):
+                        prefix = m[1]
+                        flat_counter[prefix].append(m[0])
+                        tmp.add(prefix)
 
-                prefix_counter.update(tmp)
-                tmp.clear()
+                    prefix_counter.update(tmp)
+                    tmp.clear()
 
-                tmp.update(chain.from_iterable(map(word_finder, video)))
-                word_counter.update(tmp)
-                tmp.clear()
+                    tmp.update(chain.from_iterable(map(word_finder, video)))
+                    word_counter.update(tmp)
+                    tmp.clear()
 
         stat = self._get_stat("Match", total, total - unmatched)
         freq_words = get_freq_words()
@@ -468,15 +479,13 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex:
 
-            fts = as_completed(
-                ex.submit(self._match_non_av, torrent_path)
-                for torrent_path in self._mteam.get_path(is_av=False, fetch=self._fetch)
-            )
-
-            for videos in map(_result_caller, fts):
+            for ft in as_completed(
+                ex.submit(self._match_non_av, file_list)
+                for file_list in self._mteam.get_path(is_av=False, fetch=self._fetch)
+            ):
 
                 total += 1
-                for string in videos:
+                for string in ft.result():
                     try:
                         word = word_searcher(string)[0]
                     except TypeError:
@@ -675,7 +684,7 @@ def _save_session(session_file: Path):
 
 def main():
 
-    chdir(Path(__file__).parent)
+    os.chdir(Path(__file__).parent)
 
     config = parse_config("builder.ini")
     args = parse_arguments()
