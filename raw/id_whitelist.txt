@@ -1,5 +1,6 @@
 ap
 bf
+bt
 cw3d2bd
 cw3d2dbd
 cwhdbd
@@ -17,6 +18,7 @@ mcb3dbd
 mk3d2dbd
 mx
 pb
+pt
 r18
 rd
 s-cute

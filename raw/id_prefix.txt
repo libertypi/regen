@@ -301,6 +301,7 @@ bst
 bstc
 bsv
 bsy
+bt
 btd
 btf
 bth
@@ -2262,6 +2263,7 @@ psst
 pst
 psv
 psz
+pt
 ptbi
 ptf
 ptj

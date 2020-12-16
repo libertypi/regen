@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import os
 import pickle
 import re
 import subprocess
@@ -10,7 +11,6 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice
 from operator import itemgetter, methodcaller
-import os
 from pathlib import Path
 from reprlib import repr as _repr
 from time import sleep
