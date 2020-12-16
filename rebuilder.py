@@ -6,10 +6,10 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, repeat
-from operator import itemgetter
+from operator import itemgetter, methodcaller
 from os import chdir
 from pathlib import Path
 from reprlib import repr as _repr
@@ -27,6 +27,7 @@ from torrentool.exceptions import TorrentoolException
 from regenerator import Regen
 
 _THRESH = 5
+_result_caller = methodcaller("result")
 
 
 class LastPageReached(Exception):
@@ -35,10 +36,9 @@ class LastPageReached(Exception):
 
 class JavBusScraper:
     @classmethod
-    def get_id(cls):
-        id_searcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
-        for m in filter(None, map(id_searcher, map(str.lower, cls._scrape()))):
-            yield m.group(1, 2)
+    def get_id(cls) -> Iterator[Tuple[str, str]]:
+        searcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
+        return map(methodcaller("group", 1, 2), filter(None, map(searcher, map(str.lower, cls._scrape()))))
 
     @staticmethod
     def _scrape() -> Iterator[str]:
@@ -80,7 +80,7 @@ class JavDBScraper(JavBusScraper):
                 for p in ("uncensored", "")
                 for i in range(1, 81)
             )
-            yield from chain.from_iterable(map(Future.result, fts))
+            yield from chain.from_iterable(map(_result_caller, fts))
 
 
 class GithubScraper(JavBusScraper):
@@ -141,6 +141,7 @@ class MTeamScraper:
         pool = []
         page = urljoin(self.DOMAIN, self._pages[is_av])
         matcher = re.compile(r"\bid=([0-9]+)").search
+        joinpath = subdir.joinpath
 
         if cjk_title_only:
             parser = self._get_cjk_parser()
@@ -157,9 +158,9 @@ class MTeamScraper:
 
         with ThreadPoolExecutor(max_workers=None) as ex:
             fts = as_completed(ex.submit(_request_map, page, parser, params={"page": i}) for i in self._range)
-            for link in chain.from_iterable(map(Future.result, fts)):
+            for link in chain.from_iterable(map(_result_caller, fts)):
                 try:
-                    path = subdir.joinpath(matcher(link)[1] + ".txt")
+                    path = joinpath(matcher(link)[1] + ".txt")
                 except TypeError:
                     continue
                 if path.exists():
@@ -167,7 +168,7 @@ class MTeamScraper:
                 else:
                     pool.append(ex.submit(self._dl_torrent, urljoin(self.DOMAIN, link), path))
 
-            yield from filter(None, map(Future.result, as_completed(pool)))
+            yield from filter(None, map(_result_caller, as_completed(pool)))
 
     def _login(self):
         res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
@@ -199,13 +200,15 @@ class MTeamScraper:
         ):
             cjk |= (1 << j + 1) - (1 << i)
 
-        def _parser(tree: HtmlElement):
+        def _parser(tree: HtmlElement) -> List[str]:
+            result = []
             for table in tree.iterfind('.//form[@id="form_torrent"]//table[@class="torrentname"]'):
                 try:
                     if any(1 << ord(c) & cjk for c in title_xp(table)[0]):
-                        yield link_xp(table)[0]
+                        result.extend(link_xp(table))
                 except IndexError:
                     pass
+            return result
 
         return _parser
 
@@ -357,6 +360,9 @@ class Builder:
 
 
 class Analyzer:
+
+    _video_re = r"\.(?:3gp|asf|avi|bdmv|flv|iso|m(?:2?ts|4p|[24kop]v|p2|p4|pe?g|xf)|rm|rmvb|ts|vob|webm|wmv)$"
+
     def __init__(self, regex_file: str, report_dir: str, mteam: MTeamScraper, fetch: bool) -> None:
 
         self._report_dir = Path(report_dir)
@@ -368,13 +374,9 @@ class Analyzer:
         regex = Path(regex_file).read_text(encoding="utf-8").strip()
         assert len(regex.splitlines()) == 1, "regex file should contain only one line"
 
-        p = re.fullmatch(r"(.+?)\((.+)", regex)
-        self._av_matcher = re.compile(f"{p[1]}(?P<match>{p[2]}", flags=re.M).search
-
-        self._video_filter = re.compile(
-            r"\.(?:3gp|asf|avi|bdmv|flv|iso|m(?:2?ts|4p|[24kop]v|p2|p4|pe?g|xf)|rm|rmvb|ts|vob|webm|wmv)$",
-            flags=re.MULTILINE,
-        ).search
+        p = regex.index("(", 1)
+        self._av_matcher = re.compile(f"{regex[:p]}(?P<m>{regex[p+1:]}", flags=re.M).search
+        self._video_filter = re.compile(self._video_re, flags=re.M).search
 
     def analyze_av(self):
 
@@ -395,12 +397,14 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex, open(unmatch_raw, "w", encoding="utf-8") as f:
 
-            paths = self._mteam.get_path(is_av=True, fetch=self._fetch)
+            fts = as_completed(
+                ex.submit(self._match_av, torrent_path)
+                for torrent_path in self._mteam.get_path(is_av=True, fetch=self._fetch)
+            )
 
-            for video in as_completed(ex.submit(self._match_av, p) for p in paths):
+            for video in map(_result_caller, fts):
 
                 total += 1
-                video = video.result()
                 if not video:
                     continue
 
@@ -461,18 +465,21 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex:
 
-            paths = self._mteam.get_path(is_av=False, fetch=self._fetch)
+            fts = as_completed(
+                ex.submit(self._match_non_av, torrent_path)
+                for torrent_path in self._mteam.get_path(is_av=False, fetch=self._fetch)
+            )
 
-            for ft in as_completed(ex.submit(self._match_non_av, p) for p in paths):
+            for videos in map(_result_caller, fts):
 
                 total += 1
-                for m in ft.result():
+                for string in videos:
                     try:
-                        word = word_searcher(m)[0]
+                        word = word_searcher(string)[0]
                     except TypeError:
                         pass
                     else:
-                        flat_counter[word].append(m)
+                        flat_counter[word].append(string)
                         tmp.add(word)
 
                 if tmp:
@@ -495,15 +502,15 @@ class Analyzer:
         result = []
         matcher = self._av_matcher
         with open(path, "r", encoding="utf-8") as f:
-            for v in filter(self._video_filter, f):
-                if matcher(v):
+            for video in filter(self._video_filter, f):
+                if matcher(video):
                     return
-                result.append(v)
+                result.append(video)
         return result
 
     def _match_non_av(self, path: Path) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(m["match"] for m in map(self._av_matcher, filter(self._video_filter, f)) if m)
+            return tuple(m["m"] for m in map(self._av_matcher, filter(self._video_filter, f)) if m)
 
     @staticmethod
     def _get_stat(name: str, total: int, n: int):
@@ -546,23 +553,16 @@ def _request_map(url: str, func: Callable, raise_404: bool = False, **kwargs):
             return func(fromstring(res.content))
 
 
-_freq_words = None
-
-
 def get_freq_words(lb: int = 3, ub: int = 6, n: int = 1000):
 
-    global _freq_words
+    freq_words = _request(
+        "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+    ).text
+    freq_words = islice(re.finditer(f"^[A-Za-z]{{{lb},{ub}}}$", freq_words, flags=re.M), n)
+    freq_words = frozenset(map(str.lower, map(itemgetter(0), freq_words)))
+    assert len(freq_words) == n, "fetching frequent words failed"
 
-    if _freq_words is None or len(_freq_words) != n:
-        word_list = _request(
-            "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-        ).text
-        _freq_words = frozenset(
-            m[0].lower() for m in islice(re.finditer(f"^[A-Za-z]{{{lb},{ub}}}$", word_list, flags=re.M), n)
-        )
-        assert len(_freq_words) == n, "fetching frequent words failed"
-
-    return _freq_words
+    return freq_words
 
 
 def parse_config(configfile: str):
