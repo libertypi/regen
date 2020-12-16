@@ -418,10 +418,10 @@ def _filter_affix(d: dict) -> dict:
     for k, v in d.items():
         if len(v) > 1:
             key = frozenset(v)
-            val = len(k), k
-            if tmp.setdefault(key, val) < val:
-                tmp[key] = val
-    return {v: d[v] for _, v in tmp.values()}
+            n = len(k)
+            if key not in tmp or tmp[key][0] < n:
+                tmp[key] = n, k
+    return {k: d[k] for _, k in tmp.values()}
 
 
 def _update_affix(d: dict, r: set) -> dict:
