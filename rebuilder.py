@@ -37,7 +37,7 @@ class JavBusScraper:
     @classmethod
     def get_id(cls) -> Iterator[Tuple[str, str]]:
         matcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
-        return map(methodcaller("group", 1, 2), filter(None, map(matcher, map(str.lower, cls._scrape()))))
+        return map(itemgetter(1, 2), filter(None, map(matcher, map(str.lower, cls._scrape()))))
 
     @staticmethod
     def _scrape() -> Iterator[str]:
@@ -182,7 +182,8 @@ class MTeamScraper:
                     else:
                         pool.append(ex.submit(self._dl_torrent, urljoin(self.DOMAIN, link), path))
 
-            yield from filter(None, map(methodcaller("result"), as_completed(pool)))
+            if pool:
+                yield from filter(None, map(methodcaller("result"), as_completed(pool)))
 
     def _login(self):
         res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
