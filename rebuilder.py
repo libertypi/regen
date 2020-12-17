@@ -301,7 +301,7 @@ class Builder:
         if not (kw_regex and prefix_regex):
             return
 
-        self.regex = f"(^|[^a-z0-9])({kw_regex}|[0-9]{{,3}}{prefix_regex}[ _-]?[0-9]{{2,8}})([^a-z0-9]|$)"
+        self.regex = f"(^|[^a-z0-9])({kw_regex}|[0-9]{{,3}}{prefix_regex}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
         return self._update_file(self._output_file, lambda _: (self.regex,))[0]
 
     @staticmethod
