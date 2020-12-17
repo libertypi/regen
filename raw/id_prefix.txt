@@ -2545,7 +2545,6 @@ sit
 sitw
 siv
 sivr
-sjd
 sjdv
 sjml
 sjok

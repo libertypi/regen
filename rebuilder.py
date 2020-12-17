@@ -423,7 +423,6 @@ class Analyzer:
                     unmatched += 1
                     f.write(sep)
                     f.write(content)
-                    f.write("\n")
 
                     for string, prefix in prefix_finder(content):
                         flat_counter[prefix].append(string)
