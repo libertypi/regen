@@ -45,7 +45,6 @@ class JavBusScraper:
         print("Scanning javbus...")
         parser = XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()', smart_strings=False)
         parser = _get_downloader(parser, raise_404=True)
-
         step = 500
 
         with ThreadPoolExecutor(max_workers=None) as ex:
@@ -64,7 +63,6 @@ class JavBusScraper:
                         break
 
                     lo = hi
-
                 print()
 
 
