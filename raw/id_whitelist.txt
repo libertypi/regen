@@ -18,7 +18,6 @@ mcb3dbd
 mk3d2dbd
 mx
 pb
-pt
 r18
 rd
 s-cute

@@ -9,7 +9,7 @@ import sys
 from collections import Counter, defaultdict
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from configparser import ConfigParser
-from itertools import chain, filterfalse, islice
+from itertools import chain, filterfalse, islice, tee
 from operator import itemgetter, methodcaller
 from pathlib import Path
 from reprlib import repr as _repr
@@ -36,8 +36,8 @@ class LastPageReached(Exception):
 class JavBusScraper:
     @classmethod
     def get_id(cls) -> Iterator[Tuple[str, str]]:
-        searcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
-        return map(methodcaller("group", 1, 2), filter(None, map(searcher, map(str.lower, cls._scrape()))))
+        matcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
+        return map(methodcaller("group", 1, 2), filter(None, map(matcher, map(str.lower, cls._scrape()))))
 
     @staticmethod
     def _scrape() -> Iterator[str]:
@@ -109,7 +109,7 @@ class MTeamScraper:
 
     def get_id(self) -> Iterator[Tuple[str, str]]:
 
-        id_searcher = re.compile(
+        id_finder = re.compile(
             r"""
             (?:^|/)(?:[0-9]{3})?
             ([a-z]{3,6})
@@ -119,12 +119,12 @@ class MTeamScraper:
             \b.*\.(?:mp4|wmv|avi|mkv|iso)$
             """,
             flags=re.MULTILINE | re.VERBOSE,
-        ).search
+        ).finditer
         freq_words = get_freq_words()
 
         for path in self.get_path(is_av=True, cjk_title_only=True):
             with open(path, "r", encoding="utf-8") as f:
-                for m in filter(None, map(id_searcher, f)):
+                for m in id_finder(f.read()):
                     if m[1] not in freq_words:
                         yield m.group(1, 3)
 
@@ -141,10 +141,12 @@ class MTeamScraper:
             return
 
         pool = []
+        idx = 0
         joinpath = subdir.joinpath
         matcher = re.compile(r"\bid=([0-9]+)").search
         url = urljoin(self.DOMAIN, self._pages[is_av])
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
+
         if cjk_title_only:
             parser = self._get_cjk_parser()
         else:
@@ -160,13 +162,16 @@ class MTeamScraper:
             self._login()
 
         with ThreadPoolExecutor(max_workers=None) as ex:
-            fts = as_completed(ex.submit(parser, url, params={"page": i}) for i in range(1, self._limit + 1))
-            for i, ft in enumerate(fts, 1):
-                if not i % step:
-                    if i <= self._limit - step:
-                        print(f"{i}..", end="", flush=True)
+
+            for ft in as_completed(ex.submit(parser, url, params={"page": i}) for i in range(1, self._limit + 1)):
+
+                idx += 1
+                if not idx % step:
+                    if idx <= self._limit - step:
+                        print(f"{idx}..", end="", flush=True)
                     else:
-                        print(f"{i}..{self._limit}")
+                        print(f"{idx}..{self._limit}")
+
                 for link in ft.result():
                     try:
                         path = joinpath(matcher(link)[1] + ".txt")
@@ -176,6 +181,7 @@ class MTeamScraper:
                         yield path
                     else:
                         pool.append(ex.submit(self._dl_torrent, urljoin(self.DOMAIN, link), path))
+
             yield from filter(None, map(methodcaller("result"), as_completed(pool)))
 
     def _login(self):
@@ -401,7 +407,7 @@ class Analyzer:
         total = unmatched = 0
         sep = "-" * 80 + "\n"
 
-        prefix_searcher = re.compile(r"\b[0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:hhb[0-9]*)?\b").search
+        prefix_finder = re.compile(r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:hhb[0-9]*)?)\b.*$", flags=re.M).findall
         word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
 
         flat_counter = defaultdict(list)
@@ -411,24 +417,23 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex, open(unmatch_raw, "w", encoding="utf-8") as f:
 
-            for video in ex.map(self._match_av, self._mteam.get_path(True, self._fetch), chunksize=100):
+            for content in ex.map(self._match_av, self._mteam.get_path(True, self._fetch), chunksize=100):
 
                 total += 1
-                if video:
+                if content:
                     unmatched += 1
                     f.write(sep)
-                    f.writelines(video)
+                    f.write(content)
                     f.write("\n")
 
-                    for m in filter(None, map(prefix_searcher, video)):
-                        prefix = m[1]
-                        flat_counter[prefix].append(m[0])
+                    for string, prefix in prefix_finder(content):
+                        flat_counter[prefix].append(string)
                         tmp.add(prefix)
 
                     prefix_counter.update(tmp)
                     tmp.clear()
 
-                    tmp.update(chain.from_iterable(map(word_finder, video)))
+                    tmp.update(word_finder(content))
                     word_counter.update(tmp)
                     tmp.clear()
 
@@ -442,7 +447,7 @@ class Analyzer:
         ]
         result.sort(reverse=True)
 
-        words = [(v, k) for k, v in word_counter.items() if k not in freq_words and v >= _THRESH]
+        words = [(v, k) for k, v in word_counter.items() if v >= _THRESH and k not in freq_words]
         words.sort(reverse=True)
 
         with open(unmatch_freq, "w", encoding="utf-8") as f:
@@ -499,15 +504,11 @@ class Analyzer:
         print(stat)
         print(f"Result saved to: {mismatched_file}")
 
-    def _match_av(self, path: Path) -> Optional[List[str]]:
-        result = []
-        matcher = self._av_matcher
+    def _match_av(self, path: Path) -> Optional[str]:
         with open(path, "r", encoding="utf-8") as f:
-            for video in filter(self._video_filter, f):
-                if matcher(video):
-                    return
-                result.append(video)
-        return result
+            a, b = tee(filter(self._video_filter, f))
+            if not any(map(self._av_matcher, a)):
+                return "".join(b)
 
     def _match_non_av(self, path: Path) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:

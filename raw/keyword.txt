@@ -1,5 +1,5 @@
-(5k|amateur|wow|girlsdo|virtualreal|western)porn
-([12][0-9]|0[1-9]|3[01]){3}[_-]([0-9]{2,4}|[a-z]{3,8})
+(5k|amateur|wow|girlsdo|teensdo|virtualreal|western)porn
+([12][0-9]|0[1-9]|3[01]){3}[_-]([0-9]{2,4}|[a-z]{3,7})
 (atk|tonights|cruel)girlfriends?
 (erotica|hard)x
 (exotic|tiny)4k
@@ -9,10 +9,10 @@
 (n|kb?)[0-2][0-9]{3}
 (pornstar|bigbutt|teen|milf)slikeitbig
 (true|elegant|girlstry)anal
-1000[ _-]?giri
+1000\s*giri
 10mu(sume)?
 1pon(do)?
-[0-9]{,4}[a-z]{2,6}[ _-]?[0-9]{2,8}hhb[0-9]{,2}
+[0-9]{,4}[a-z]{2,6}-?[0-9]{2,8}hhb[0-9]{,2}
 [ch]0930
 all(anal|finegirls|over30|internal)
 als(scan|angels)
@@ -20,7 +20,7 @@ anal(ized|beauty|teenangels|brats)?
 assholefever
 atk(premium|exotics|galleria)
 av9898
-avs[ _-]?museum
+avs[_-]?museum
 bang(bros|bus|pov)
 bigcockbully
 black(ed(raw)?|sonblondes)
@@ -33,44 +33,41 @@ creampie[sd]?
 czech(av|massage|solarium|toilets)
 ddfnetwork
 defloration
-desperateamateurs
-devilsfilm
+devils\s*film
 digital\s*playground
-dorcelclub
-downblouseloving
-evilangel
+dorcel\s*club
+evil\s*angel
 exxxtra\s*small
 facial\s*abuse
 fakedrivingschool
-familystrokes
+family\s*strokes
 fc2(ppv)?
 fellatio\s*japan
-fetishtheatre
 firstanalquest
 footjob
 foreveralonedude
-g[ _-]?queen
+g-?queen
 gangbang(creampie)?
 girlcum
-girls([ _-]?delta|way)
+girls(-?delta|way)
 h4610
-hardcoreyouth
-hegre
+hegre(art)?
 hentai
 heydouga[0-9]*
 heyzo
 honnamatv
 hotcrazymess
-inthecrack
+in\s*the\s*crack
 japanhdv
 jukujo
 kin8(tengoku)?
 kink
 legalporno
 lesbea
+masturbat(es?|ion)
 mesubuta
-met[ _-]?artx?
-monstersofcock
+met-?artx?
+monsters\s*of\s*cock
 mura(mura)?
 myveryfirsttime
 naughty\s*america(vr)?
@@ -82,13 +79,13 @@ pervcity
 playboyplus
 porn(hub|pros|megaload|world|18|o|fidelity)?
 public\s*agent
-realitykings
+reality\s*kings
 sellyourgf
-sexart
+sex\s*art
 sharemybf
 siterip
-sm[ _-]?miracle
-teenfidelity
+sm[ -]?miracle
+teen\s*fidelity
 teenslove((huge|black)cocks|anal)
 th101
 threesome
