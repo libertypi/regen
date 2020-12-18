@@ -428,12 +428,16 @@ def _filter_affix(d: dict) -> dict:
 
 
 def _update_affix(d: dict, r: set) -> dict:
-    result = {}
+
+    tmp = {}
     for k, v in d.items():
         v.intersection_update(r)
         if len(v) > 1:
-            result[k] = v
-    return result
+            key = frozenset(v)
+            n = len(k)
+            if key not in tmp or tmp[key][0] < n:
+                tmp[key] = n, k
+    return {k: d[k] for _, k in tmp.values()}
 
 
 def _optimize_group(unvisited: set, candidate: dict):
