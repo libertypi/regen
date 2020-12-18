@@ -46,6 +46,7 @@ from ortools.sat.python import cp_model
 
 _specials = frozenset("{}()[]|?*+")
 _rangeChars = frozenset("0123456789,")
+_repetitions = frozenset("*?+{")
 _split_token = re.compile(r"[^\\]|\\.").findall
 
 
@@ -226,17 +227,17 @@ class Parser:
             self.index += 1
             return char
         except IndexError:
-            return None
+            pass
 
     def _peek(self):
         try:
             return self.token[self.index]
         except IndexError:
-            return None
+            pass
 
     def _eat_suffix(self):
         char = self._peek()
-        if not (char and char in "*?+{"):
+        if char not in _repetitions:
             return
 
         suffixStart = self.index  # first char of suffix
@@ -462,6 +463,7 @@ def _optimize_group(unvisited: set, candidate: dict):
             continue
 
         model = cp_model.CpModel()
+        AddImplication = model.AddImplication
         pool[currentKey] = model.NewBoolVar("0")
         stack.append(currentKey)
         index = 1
@@ -482,7 +484,7 @@ def _optimize_group(unvisited: set, candidate: dict):
                     index += 1
                     pool[nextKey] = nextVar
                     stack.append(nextKey)
-                model.AddImplication(nextVar, currentVarNot)
+                AddImplication(nextVar, currentVarNot)
 
         model.Maximize(
             cp_model.LinearExpr.ScalProd(
