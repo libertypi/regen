@@ -203,6 +203,7 @@ bbi
 bbs
 bbss
 bbst
+bbtu
 bbza
 bbzzd
 bcdp
@@ -1109,6 +1110,7 @@ hhgt
 hhh
 hhk
 hhkl
+hhoy
 hhpr
 hib
 high
@@ -1836,6 +1838,7 @@ mndo
 mng
 mnh
 mnpt
+mnse
 mnt
 mntj
 mntr
@@ -2944,6 +2947,7 @@ vic
 vicd
 vida
 vikg
+vio
 vipd
 vipr
 virn

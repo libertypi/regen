@@ -45,14 +45,12 @@ from typing import Iterable
 from ortools.sat.python import cp_model
 
 _specials = frozenset("{}()[]|?*+")
+_rangeChars = frozenset("0123456789,")
+_split_token = re.compile(r"[^\\]|\\.").findall
 
 
 class Parser:
 
-    _rangeChars = frozenset("0123456789,")
-    _suffixes = frozenset("*?+{")
-    _repetitions = frozenset("*?+")
-    _psplit = re.compile(r"[^\\]|\\.").findall
     _is_char_block = re.compile(r"\\?.|\[(\^?\])?([^]]|\\\])*\]").fullmatch
 
     def __init__(self) -> None:
@@ -60,13 +58,13 @@ class Parser:
         self.hold = []
         self.charset = []
         self.index = 0
-        self.subParser = None
+        self.subParser = self.token = None
 
     def parse(self, string):
         """Convert a regular expression to a tokenset."""
 
         try:
-            token = self._psplit(string)
+            token = _split_token(string)
         except TypeError:
             if not isinstance(string, list):
                 raise TypeError(f"Wrong type feed to Parser: {string}")
@@ -75,6 +73,9 @@ class Parser:
         if _specials.isdisjoint(token):  # Not regex we can handle
             yield tuple(token)
             return
+
+        if self.token is not None:
+            raise RuntimeError("Parser is not idle.")
 
         self.token = token
         self._string = string
@@ -235,21 +236,22 @@ class Parser:
 
     def _eat_suffix(self):
         char = self._peek()
-        if char not in self._suffixes:
+        if not (char and char in "*?+{"):
             return
 
         suffixStart = self.index  # first char of suffix
         if char == "{":
             try:
                 suffixEnd = self.token.index("}", suffixStart + 2)  # +2 so "{}" will not be matched
-                assert self._rangeChars.issuperset(self.token[suffixStart + 1 : suffixEnd])
-            except (ValueError, AssertionError):
+                if not _rangeChars.issuperset(self.token[suffixStart + 1 : suffixEnd]):
+                    raise ValueError
+            except ValueError:
                 raise ValueError(f"Bad range format: {self.string}")
 
             self.index = suffixEnd + 1  # 1 char after "}"
             char = self._peek()
 
-        while char in self._repetitions:
+        while char and char in "*?+":
             self.index += 1
             char = self._peek()
 
@@ -324,7 +326,7 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
     while prefix or suffix:
 
-        for source, i in (prefix, 0), (suffix, 1):
+        for i, source in enumerate((prefix, suffix)):
 
             for k, v in source.items():
                 mirror[frozenset(segment[j][i][k] for j in v)].append(k)
@@ -357,12 +359,13 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
         if not unvisitCand:
             break
+
         for key in _optimize_group(unvisitCand, candidate):
             result.append(candidate[key][1])
             tokenSet.difference_update(key)
-
         if not tokenSet:
             break
+
         prefix = _update_affix(prefix, tokenSet)
         suffix = _update_affix(suffix, tokenSet)
 
@@ -425,9 +428,12 @@ def _filter_affix(d: dict) -> dict:
 
 
 def _update_affix(d: dict, r: set) -> dict:
-    for v in d.values():
+    result = {}
+    for k, v in d.items():
         v.intersection_update(r)
-    return {k: v for k, v in d.items() if len(v) > 1}
+        if len(v) > 1:
+            result[k] = v
+    return result
 
 
 def _optimize_group(unvisited: set, candidate: dict):
