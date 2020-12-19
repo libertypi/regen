@@ -514,7 +514,7 @@ class Analyzer:
 
     @staticmethod
     def _get_stat(name: str, total: int, n: int):
-        return f"Total: {total}. {name}: {n}. Percentage: {n / total * 100:.2f}%."
+        return f"Total: {total}. {name}: {n}. Percentage: {n / total:.2%}."
 
     @staticmethod
     def _format_report(result: Iterable):
