@@ -367,8 +367,8 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
         if not tokenSet:
             break
 
-        prefix = _update_affix(prefix, tokenSet)
-        suffix = _update_affix(suffix, tokenSet)
+        prefix = _filter_affix(prefix, tokenSet)
+        suffix = _filter_affix(suffix, tokenSet)
 
     if quantifier:
         try:
@@ -411,34 +411,33 @@ def _is_word(token: tuple):
     return sum(map(len, token)) > 1
 
 
-def _filter_affix(d: dict) -> dict:
+def _filter_affix(d: dict, intersect: set = None):
     """Keep groups which divide the same words at max common subsequence,
     and remove single member groups.
 
     - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first
         item will be keeped.
     """
+    if intersect is None:
+        stream = d.items()
+    else:
+        stream = _intersect_affix(d, intersect)
+
     tmp = {}
-    for k, v in d.items():
+    for k, v in stream:
         if len(v) > 1:
             key = frozenset(v)
             n = len(k)
             if key not in tmp or tmp[key][0] < n:
                 tmp[key] = n, k
+
     return {k: d[k] for _, k in tmp.values()}
 
 
-def _update_affix(d: dict, r: set) -> dict:
-
-    tmp = {}
-    for k, v in d.items():
-        v.intersection_update(r)
-        if len(v) > 1:
-            key = frozenset(v)
-            n = len(k)
-            if key not in tmp or tmp[key][0] < n:
-                tmp[key] = n, k
-    return {k: d[k] for _, k in tmp.values()}
+def _intersect_affix(d: dict, r: set):
+    for i in d.items():
+        i[1].intersection_update(r)
+        yield i
 
 
 def _optimize_group(unvisited: set, candidate: dict):
@@ -507,25 +506,45 @@ class Regen:
     __slots__ = ("_tokens", "_text", "_cache")
 
     def __init__(self, wordlist: Iterable[str]) -> None:
+        """Convert a list of words to an optimized regular expression, or vise versa.
+
+        ### Args:
+        - `wordlist`: an iterable of strings.
+
+        ### Methods:
+        - `to_text`: Extract the regular expressions to a list of corresponding words.
+        - `to_regex`: Return an optimized regular expression matching all the words.
+
+        ### Examples:
+        >>> from regenerator import Regen
+
+        >>> wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
+        >>> regen = Regen(wordlist)
+        >>> regen.to_regex()
+        '[AB]B[CD]'
+
+        >>> wordlist = ['[AB]B[CD]', 'XYZ']
+        >>> regen = Regen(wordlist)
+
+        >>> regen.to_text()
+        ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
+
+        >>> regen.to_regex()
+        '(XYZ|[AB]B[CD])'
+
+        >>> regen.to_regex(omitOuterParen=True)
+        'XYZ|[AB]B[CD]'
+        """
 
         if not isinstance(wordlist, Iterable) or isinstance(wordlist, str):
             raise TypeError("Input should be a list of strings.")
 
-        parser = Parser()
-        self._tokens = frozenset(chain.from_iterable(map(parser.parse, wordlist)))
+        self._tokens = frozenset(chain.from_iterable(map(Parser().parse, wordlist)))
         self._cache = {}
-
-    def __repr__(self):
-        inner = ", ".join(f"'{w}'" for w in self.to_text())
-        return f"{self.__class__.__name__}([{inner}])"
 
     def to_text(self):
         """Extract the regular expressions to a list of corresponding words."""
-        try:
-            text = self._text
-        except AttributeError:
-            text = self._text = sorted(map("".join, self._tokens))
-        return iter(text)
+        return sorted(map("".join, self._tokens))
 
     def to_regex(self, omitOuterParen: bool = False) -> str:
         """Return an optimized regular expression matching all the words.
