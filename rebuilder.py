@@ -380,7 +380,7 @@ class Builder:
 
 class Analyzer:
 
-    _video_re = r"\.(?:3gp|asf|avi|bdmv|flv|iso|m(?:2?ts|4p|[24kop]v|p2|p4|pe?g|xf)|rm|rmvb|ts|vob|webm|wmv)$"
+    _video_re = r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$"
 
     def __init__(self, regex_file: str, report_dir: str, mteam: MTeamScraper, fetch: bool) -> None:
 
@@ -407,7 +407,7 @@ class Analyzer:
         sep = "-" * 80 + "\n"
 
         prefix_finder = re.compile(r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:hhb[0-9]*)?)\b.*$", flags=re.M).findall
-        word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
+        word_finder = re.compile(r"\b(?![\d_]+\b)\w{3,}").findall
 
         flat_counter = defaultdict(list)
         prefix_counter = Counter()
@@ -441,7 +441,7 @@ class Analyzer:
         result = [
             (i, len(v), k, set(v))
             for k, v in flat_counter.items()
-            if k not in freq_words and (i := prefix_counter[k]) >= _THRESH
+            if (i := prefix_counter[k]) >= _THRESH and k not in freq_words
         ]
         result.sort(reverse=True)
 

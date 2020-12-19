@@ -423,7 +423,6 @@ cosdokia
 cosq
 cosu
 cosvr
-cosx
 cov
 cowp
 cpcp
