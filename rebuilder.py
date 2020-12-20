@@ -26,7 +26,8 @@ from torrentool.exceptions import TorrentoolException
 
 from regen import Regen
 
-_THRESH = 5
+_JAV_THRESH = 5
+_WES_THRESH = 10
 
 
 class LastPageReached(Exception):
@@ -87,7 +88,7 @@ class JavBusScraper(Scraper):
         )
         result = Counter(m[1].lower() for m in map(matcher, result) if m)
         for k, v in result.items():
-            if v > _THRESH:
+            if v > _WES_THRESH:
                 yield k
 
 
@@ -122,7 +123,7 @@ class JavDBScraper(Scraper):
                 freq = int(sub_nondigit("", a.findtext("span")))
             except ValueError:
                 continue
-            if freq > _THRESH:
+            if freq > _WES_THRESH:
                 title = a.findtext("strong")
                 if matcher(title):
                     yield title.replace(" ", "").lower()
@@ -344,13 +345,9 @@ class Builder:
     def _build_regex(self, name: str, omitOuterParen: bool):
 
         joinpath = self._raw_dir.joinpath
-        wordlist_file = joinpath(f"{name}.txt")
-        whitelist_file = joinpath(f"{name}_whitelist.txt")
-        blacklist_file = joinpath(f"{name}_blacklist.txt")
-
-        wordlist = _update_file(wordlist_file, getattr(self, f"_{name}_strategy"))
-        whitelist = _update_file(whitelist_file, self._filter_regex)
-        blacklist = _update_file(blacklist_file, self._filter_regex)
+        wordlist = _update_file(joinpath(f"{name}.txt"), getattr(self, f"_{name}_strategy"))
+        whitelist = _update_file(joinpath(f"{name}_whitelist.txt"), self._filter_regex)
+        blacklist = _update_file(joinpath(f"{name}_blacklist.txt"), self._filter_regex)
 
         if name == "keyword":
             regex = chain(whitelist, blacklist)
@@ -396,7 +393,7 @@ class Builder:
         prefix_counter = Counter(map(itemgetter(0), result))
         print(f"Uniq ID: {len(result)}. Uniq prefix: {len(prefix_counter)}.")
 
-        return (k for k, v in prefix_counter.items() if v >= _THRESH)
+        return (k for k, v in prefix_counter.items() if v >= _JAV_THRESH)
 
     @staticmethod
     def _filter_regex(wordlist: Iterable[str]) -> Set[str]:
@@ -488,11 +485,11 @@ class Analyzer:
         result = [
             (i, len(v), k, set(v))
             for k, v in flat_counter.items()
-            if (i := prefix_counter[k]) >= _THRESH and k not in freq_words
+            if (i := prefix_counter[k]) >= _JAV_THRESH and k not in freq_words
         ]
         result.sort(reverse=True)
 
-        words = [(v, k) for k, v in word_counter.items() if v >= _THRESH and k not in freq_words]
+        words = [(v, k) for k, v in word_counter.items() if v >= _JAV_THRESH and k not in freq_words]
         words.sort(reverse=True)
 
         with open(unmatch_freq, "w", encoding="utf-8") as f:

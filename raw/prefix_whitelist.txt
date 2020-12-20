@@ -20,7 +20,7 @@ mx
 pb
 r18
 rd
-s-cute
+s-?cute
 s2m
 s2mbd
 s2mcr
