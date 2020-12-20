@@ -12,7 +12,7 @@ for internal uses only.
 
 ### Examples:
 
-    >>> from regenerator import Regen
+    >>> from regen import Regen
 
     >>> wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
     >>> regen = Regen(wordlist)
@@ -516,7 +516,7 @@ class Regen:
         - `to_regex`: Return an optimized regular expression matching all the words.
 
         ### Examples:
-        >>> from regenerator import Regen
+        >>> from regen import Regen
 
         >>> wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
         >>> regen = Regen(wordlist)

@@ -24,7 +24,7 @@ from requests.cookies import create_cookie
 from torrentool.api import Torrent
 from torrentool.exceptions import TorrentoolException
 
-from regenerator import Regen
+from regen import Regen
 
 _THRESH = 5
 
@@ -33,7 +33,7 @@ class LastPageReached(Exception):
     pass
 
 
-class JavBusScraper:
+class Scraper:
     @classmethod
     def get_id(cls) -> Iterator[Tuple[str, str]]:
         matcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
@@ -41,21 +41,34 @@ class JavBusScraper:
 
     @staticmethod
     def _scrape() -> Iterator[str]:
+        raise NotImplemented
 
-        print("Scanning javbus...")
+    @staticmethod
+    def get_western() -> Iterator[str]:
+        raise NotImplemented
+
+
+class JavBusScraper(Scraper):
+    @staticmethod
+    def _scrape(
+        base: str = "https://www.javbus.com/",
+        paths: Iterable[str] = ("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"),
+    ) -> Iterator[str]:
+
+        print(f"Scanning {base}...")
         parser = XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()', smart_strings=False)
         parser = _get_downloader(parser, raise_404=True)
         step = 500
 
         with ThreadPoolExecutor(max_workers=None) as ex:
-            for base in ("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"):
+            for path in paths:
                 lo = 1
-                print(f"  /{base}: ", end="", flush=True)
+                print(f"  /{path}: ", end="", flush=True)
 
                 while True:
                     hi = lo + step
                     print(f"{lo}:{hi}...", end="", flush=True)
-                    urls = (f"https://www.javbus.com/{base}/{i}" for i in range(lo, hi))
+                    urls = (f"{base}/{path}/{i}" for i in range(lo, hi))
 
                     try:
                         yield from chain.from_iterable(ex.map(parser, urls))
@@ -65,25 +78,61 @@ class JavBusScraper:
                     lo = hi
                 print()
 
+    @classmethod
+    def get_western(cls):
+        matcher = re.compile(r"\s*(\w+)\.[0-2][0-9]\.(?:1[0-2]|0[1-9])\.(?:3[01]|[12][0-9]|0[1-9])\s*").fullmatch
 
-class JavDBScraper(JavBusScraper):
+        result = cls._scrape(
+            base="https://www.javbus.org/",
+            paths=("page", *(f"studio/{i}" for i in range(1, 5))),
+        )
+        result = Counter(m[1].lower() for m in map(matcher, result) if m)
+        for k, v in result.items():
+            if v > _THRESH:
+                yield k
+
+
+class JavDBScraper(Scraper):
     @staticmethod
-    def _scrape() -> Iterator[str]:
+    def _scrape(
+        base=("uncensored", ""),
+        limit: int = 81,
+        xpath: str = './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
+    ) -> Iterator[str]:
 
         print(f"Scanning javdb...")
-        parser = XPath('.//div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()', smart_strings=False)
-        parser = _get_downloader(parser)
+        parser = _get_downloader(XPath(xpath, smart_strings=False))
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
-                ex.submit(parser, f"https://javdb.com/{base}?page={i}")
-                for base in ("uncensored", "")
-                for i in range(1, 81)
+                ex.submit(parser, f"https://javdb.com/{b}?page={i}") for b in base for i in range(1, limit)
             )
             yield from chain.from_iterable(map(methodcaller("result"), fts))
 
+    @classmethod
+    def get_western(cls):
 
-class GithubScraper(JavBusScraper):
+        result = cls._scrape(
+            base=("series/western",),
+            limit=5,
+            xpath='.//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
+        )
+        sub_nondigit = re.compile(r"\D+").sub
+        matcher = re.compile(r"[\s\w]+").fullmatch
+        sub_space = re.compile(r"\s+").sub
+
+        for a in result:
+            try:
+                freq = int(sub_nondigit("", a.findtext("span")))
+            except ValueError:
+                continue
+            if freq > _THRESH:
+                title = a.findtext("strong")
+                if matcher(title):
+                    yield sub_space("", title).lower()
+
+
+class GithubScraper(Scraper):
     @staticmethod
     def _scrape() -> List[str]:
 
@@ -280,31 +329,48 @@ class Builder:
         self._mteam = mteam
         self._fetch = fetch
 
-        self._kw_file = raw_dir.joinpath("keyword.txt")
-        self._prefix_file = raw_dir.joinpath("id_prefix.txt")
-        self._whitelist_file = raw_dir.joinpath("id_whitelist.txt")
-        self._blacklist_file = raw_dir.joinpath("id_blacklist.txt")
-
     def build(self):
 
-        self.kw_regex = kw_regex = self._get_regex(
-            wordlist=self._update_file(self._kw_file, self._filter_strategy),
-            name="Keywords",
+        self.keyword_regex = keyword = self._build_regex(
+            name="keyword",
             omitOuterParen=True,
         )
-        self.prefix_regex = prefix_regex = self._get_regex(
-            wordlist=self._update_file(self._prefix_file, self._prefix_strategy),
-            name="ID Prefix",
+        self.prefix_regex = prefix = self._build_regex(
+            name="prefix",
             omitOuterParen=False,
         )
-        if not (kw_regex and prefix_regex):
+        if not (keyword and prefix):
             return
 
-        self.regex = f"(^|[^a-z0-9])({kw_regex}|[0-9]{{,3}}{prefix_regex}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
-        return self._update_file(self._output_file, lambda _: (self.regex,))[0]
+        self.regex = f"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
+        return _update_file(self._output_file, lambda _: (self.regex,))[0]
 
-    @staticmethod
-    def _get_regex(wordlist: List[str], name: str, omitOuterParen: bool) -> str:
+    def _build_regex(self, name: str, omitOuterParen: bool):
+
+        raw_dir = self._raw_dir
+        wordlist_file = raw_dir.joinpath(f"{name}.txt")
+        whitelist_file = raw_dir.joinpath(f"{name}_whitelist.txt")
+        blacklist_file = raw_dir.joinpath(f"{name}_blacklist.txt")
+
+        wordlist = _update_file(wordlist_file, getattr(self, f"_{name}_strategy"))
+
+        whitelist = _update_file(whitelist_file, self._filter_regex)
+        if whitelist:
+            regex = re.compile(r"\b(?:{})\b".format("|".join(whitelist)))
+            regex = regex.search if name == "keyword" else regex.fullmatch
+            wordlist = filterfalse(regex, wordlist)
+        wordlist = set(wordlist)
+        wordlist.update(whitelist)
+
+        blacklist = _update_file(blacklist_file, self._filter_regex)
+        wordlist.difference_update(blacklist)
+        if name != "keyword":
+            blacklist.append(self.keyword_regex)
+        if blacklist:
+            wordlist = filterfalse(re.compile("|".join(blacklist)).fullmatch, wordlist)
+
+        wordlist = sorted(wordlist)
+        print(f"{name} chosen: {len(wordlist)}")
 
         regen = Regen(wordlist)
         computed = regen.to_regex(omitOuterParen=omitOuterParen)
@@ -319,63 +385,52 @@ class Builder:
             return concat
 
         regen.verify_result()
-        print(f"{name}: Regex test passed. Characters saved: {-diff}.")
+        print(f"{name} regex test passed, {-diff} characters saved.")
         return computed
 
-    @staticmethod
-    def _update_file(file: Path, stragety: Callable[[Iterable[str]], Iterable[str]]) -> List[str]:
+    def _keyword_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
+        if not self._fetch and old_list:
+            return self._filter_regex(old_list)
+        return set(chain(JavBusScraper.get_western(), JavDBScraper.get_western()))
 
-        try:
-            with file.open("r+", encoding="utf-8") as f:
-                old_list = f.read().splitlines()
-                result = sorted(stragety(old_list))
-                if old_list != result:
-                    f.seek(0)
-                    f.writelines(i + "\n" for i in result)
-                    f.truncate()
-                    print(f"{file} updated.")
-
-        except FileNotFoundError:
-            result = sorted(stragety([]))
-            file.parent.mkdir(parents=True, exist_ok=True)
-            with file.open(mode="w", encoding="utf-8") as f:
-                f.writelines(i + "\n" for i in result)
-            print(f"{file} created.")
-
-        return result
-
-    def _web_scrape(self) -> Set[str]:
+    def _prefix_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
+        if not self._fetch and old_list:
+            return self._filter_regex(old_list)
 
         result = set(self._mteam.get_id())
         for cls in JavBusScraper, JavDBScraper, GithubScraper:
             result.update(cls.get_id())
 
-        uniq_id = len(result)
         prefix_counter = Counter(map(itemgetter(0), result))
-        result = {k for k, v in prefix_counter.items() if v >= _THRESH}
+        print(f"Uniq ID: {len(result)}. Uniq prefix: {len(prefix_counter)}.")
 
-        print(f"Uniq ID: {uniq_id}. Uniq prefix: {len(prefix_counter)}. Final: {len(result)}.")
-        return result
-
-    def _prefix_strategy(self, old_list: Iterable[str]) -> Iterator[str]:
-
-        if self._fetch or not old_list:
-            result = self._web_scrape()
-        else:
-            result = self._filter_strategy(old_list)
-
-        result.update(self._update_file(self._whitelist_file, self._extract_strategy))
-        result.difference_update(self._update_file(self._blacklist_file, self._extract_strategy))
-
-        return filterfalse(re.compile(self.kw_regex).fullmatch, result)
+        return (k for k, v in prefix_counter.items() if v >= _THRESH)
 
     @staticmethod
-    def _filter_strategy(wordlist: Iterable[str]) -> Set[str]:
+    def _filter_regex(wordlist: Iterable[str]) -> Set[str]:
         return set(map(str.lower, filter(None, map(str.strip, wordlist))))
 
-    @classmethod
-    def _extract_strategy(cls, old_list: Iterable[str]) -> Iterator[str]:
-        return Regen(cls._filter_strategy(old_list)).to_text()
+
+def _update_file(file: Path, stragety: Callable[[Iterable[str]], Iterable[str]]) -> List[str]:
+
+    try:
+        with open(file, "r+", encoding="utf-8") as f:
+            old_list = f.read().splitlines()
+            result = sorted(stragety(old_list))
+            if old_list != result:
+                f.seek(0)
+                f.writelines(i + "\n" for i in result)
+                f.truncate()
+                print(f"{file} updated.")
+
+    except FileNotFoundError:
+        result = sorted(stragety([]))
+        file.parent.mkdir(parents=True, exist_ok=True)
+        with open(file, mode="w", encoding="utf-8") as f:
+            f.writelines(i + "\n" for i in result)
+        print(f"{file} created.")
+
+    return result
 
 
 class Analyzer:
@@ -407,7 +462,7 @@ class Analyzer:
         sep = "-" * 80 + "\n"
 
         prefix_finder = re.compile(r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:hhb[0-9]*)?)\b.*$", flags=re.M).findall
-        word_finder = re.compile(r"\b(?![\d_]+\b)\w{3,}").findall
+        word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
 
         flat_counter = defaultdict(list)
         prefix_counter = Counter()
