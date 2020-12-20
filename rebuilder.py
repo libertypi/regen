@@ -68,10 +68,9 @@ class JavBusScraper(Scraper):
                 while True:
                     hi = lo + step
                     print(f"{lo}:{hi}...", end="", flush=True)
-                    urls = (f"{base}/{path}/{i}" for i in range(lo, hi))
 
                     try:
-                        yield from chain.from_iterable(ex.map(parser, urls))
+                        yield from chain.from_iterable(ex.map(parser, (f"{base}/{path}/{i}" for i in range(lo, hi))))
                     except LastPageReached:
                         break
 
@@ -80,7 +79,7 @@ class JavBusScraper(Scraper):
 
     @classmethod
     def get_western(cls):
-        matcher = re.compile(r"\s*(\w+)\.[0-2][0-9]\.(?:1[0-2]|0[1-9])\.(?:3[01]|[12][0-9]|0[1-9])\s*").fullmatch
+        matcher = re.compile(r"\s*([A-Za-z0-9]+)(?:\.\d\d){3}\s*").fullmatch
 
         result = cls._scrape(
             base="https://www.javbus.org/",
@@ -111,17 +110,14 @@ class JavDBScraper(Scraper):
 
     @classmethod
     def get_western(cls):
+        sub_nondigit = re.compile(r"[^0-9]").sub
+        matcher = re.compile(r"[A-Za-z0-9 ]+").fullmatch
 
-        result = cls._scrape(
+        for a in cls._scrape(
             base=("series/western",),
             limit=5,
             xpath='.//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
-        )
-        sub_nondigit = re.compile(r"\D+").sub
-        matcher = re.compile(r"[\s\w]+").fullmatch
-        sub_space = re.compile(r"\s+").sub
-
-        for a in result:
+        ):
             try:
                 freq = int(sub_nondigit("", a.findtext("span")))
             except ValueError:
@@ -129,7 +125,7 @@ class JavDBScraper(Scraper):
             if freq > _THRESH:
                 title = a.findtext("strong")
                 if matcher(title):
-                    yield sub_space("", title).lower()
+                    yield title.replace(" ", "").lower()
 
 
 class GithubScraper(Scraper):
@@ -325,7 +321,7 @@ class Builder:
     def __init__(self, output_file: str, raw_dir: str, mteam: MTeamScraper, fetch: bool) -> None:
 
         self._output_file = Path(output_file)
-        self._raw_dir = raw_dir = Path(raw_dir)
+        self._raw_dir = Path(raw_dir)
         self._mteam = mteam
         self._fetch = fetch
 
@@ -347,29 +343,25 @@ class Builder:
 
     def _build_regex(self, name: str, omitOuterParen: bool):
 
-        raw_dir = self._raw_dir
-        wordlist_file = raw_dir.joinpath(f"{name}.txt")
-        whitelist_file = raw_dir.joinpath(f"{name}_whitelist.txt")
-        blacklist_file = raw_dir.joinpath(f"{name}_blacklist.txt")
+        joinpath = self._raw_dir.joinpath
+        wordlist_file = joinpath(f"{name}.txt")
+        whitelist_file = joinpath(f"{name}_whitelist.txt")
+        blacklist_file = joinpath(f"{name}_blacklist.txt")
 
         wordlist = _update_file(wordlist_file, getattr(self, f"_{name}_strategy"))
-
         whitelist = _update_file(whitelist_file, self._filter_regex)
-        if whitelist:
-            regex = re.compile(r"\b(?:{})\b".format("|".join(whitelist)))
-            regex = regex.search if name == "keyword" else regex.fullmatch
-            wordlist = filterfalse(regex, wordlist)
-        wordlist = set(wordlist)
-        wordlist.update(whitelist)
-
         blacklist = _update_file(blacklist_file, self._filter_regex)
-        wordlist.difference_update(blacklist)
-        if name != "keyword":
-            blacklist.append(self.keyword_regex)
-        if blacklist:
-            wordlist = filterfalse(re.compile("|".join(blacklist)).fullmatch, wordlist)
 
+        if name == "keyword":
+            regex = chain(whitelist, blacklist)
+        else:
+            regex = chain(whitelist, blacklist, (self.keyword_regex,))
+        wordlist = set(filterfalse(re.compile("|".join(regex)).fullmatch, wordlist))
+
+        wordlist.update(whitelist)
+        wordlist.difference_update(blacklist)
         wordlist = sorted(wordlist)
+
         print(f"{name} chosen: {len(wordlist)}")
 
         regen = Regen(wordlist)

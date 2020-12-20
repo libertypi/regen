@@ -45,6 +45,7 @@ from typing import Iterable
 from ortools.sat.python import cp_model
 
 _specials = frozenset("{}()[]|?*+")
+_not_special = _specials.isdisjoint
 _rangeChars = frozenset("0123456789,")
 _repetitions = frozenset("*?+{")
 _split_token = re.compile(r"[^\\]|\\.").findall
@@ -71,7 +72,7 @@ class Parser:
                 raise TypeError(f"Wrong type feed to Parser: {string}")
             token = string
 
-        if _specials.isdisjoint(token):  # Not regex we can handle
+        if _not_special(token):  # Not regex we can handle
             yield tuple(token)
             return
 
@@ -479,9 +480,8 @@ def _optimize_group(unvisited: set, candidate: dict):
                 try:
                     nextVar = pool[nextKey]
                 except KeyError:
-                    nextVar = model.NewBoolVar(f"{index}")
+                    nextVar = pool[nextKey] = model.NewBoolVar(f"{index}")
                     index += 1
-                    pool[nextKey] = nextVar
                     stack.append(nextKey)
                 AddImplication(nextVar, currentVarNot)
 
@@ -503,7 +503,7 @@ def _optimize_group(unvisited: set, candidate: dict):
 
 class Regen:
 
-    __slots__ = ("_tokens", "_text", "_cache")
+    __slots__ = ("_tokens", "_cache")
 
     def __init__(self, wordlist: Iterable[str]) -> None:
         """Convert a list of words to an optimized regular expression, or vise versa.
@@ -571,7 +571,7 @@ class Regen:
             raise ValueError("Extraction from computed regex is different from that of original wordlist.")
 
         for i in filterfalse(re.compile(regex).fullmatch, self.to_text()):
-            if _specials.isdisjoint(i):
+            if _not_special(i):
                 raise ValueError(f"Computed regex does not fully match this word: '{i}'")
 
         return True
