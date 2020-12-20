@@ -57,24 +57,24 @@ class JavBusScraper(Scraper):
     ) -> Iterator[str]:
 
         print(f"Scanning {base}...")
-        parser = XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()', smart_strings=False)
-        parser = _get_downloader(parser, raise_404=True)
+        parser = _get_downloader(
+            XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()', smart_strings=False),
+            raise_404=True,
+        )
         step = 500
 
         with ThreadPoolExecutor(max_workers=None) as ex:
-            for path in paths:
+            for p in paths:
                 lo = 1
-                print(f"  /{path}: ", end="", flush=True)
+                print(f"  /{p}: ", end="", flush=True)
 
                 while True:
                     hi = lo + step
-                    print(f"{lo}:{hi}...", end="", flush=True)
-
+                    print(f"{lo}:{hi}..", end="", flush=True)
                     try:
-                        yield from chain.from_iterable(ex.map(parser, (f"{base}/{path}/{i}" for i in range(lo, hi))))
+                        yield from chain.from_iterable(ex.map(parser, (f"{base}/{p}/{i}" for i in range(lo, hi))))
                     except LastPageReached:
                         break
-
                     lo = hi
                 print()
 
@@ -105,13 +105,13 @@ class JavDBScraper(Scraper):
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
-                ex.submit(parser, f"https://javdb.com/{b}?page={i}") for b in base for i in range(1, limit)
+                ex.submit(parser, f"https://javdb.com/{b}?page={i}") for i in range(1, limit) for b in base
             )
             yield from chain.from_iterable(map(methodcaller("result"), fts))
 
     @classmethod
     def get_western(cls):
-        sub_nondigit = re.compile(r"[^0-9]").sub
+        find_digit = re.compile(r"[0-9]+").search
         matcher = re.compile(r"[A-Za-z0-9 ]+").fullmatch
 
         for a in cls._scrape(
@@ -120,8 +120,8 @@ class JavDBScraper(Scraper):
             xpath='.//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
         ):
             try:
-                freq = int(sub_nondigit("", a.findtext("span")))
-            except ValueError:
+                freq = int(find_digit(a.findtext("span"))[0])
+            except TypeError:
                 continue
             if freq > _WES_THRESH:
                 title = a.findtext("strong")
