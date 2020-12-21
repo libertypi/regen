@@ -346,8 +346,8 @@ class Builder:
 
         joinpath = self._raw_dir.joinpath
         wordlist = _update_file(joinpath(f"{name}.txt"), getattr(self, f"_{name}_strategy"))
-        whitelist = _update_file(joinpath(f"{name}_whitelist.txt"), self._filter_regex)
-        blacklist = _update_file(joinpath(f"{name}_blacklist.txt"), self._filter_regex)
+        whitelist = _update_file(joinpath(f"{name}_whitelist.txt"), self._normalize_words)
+        blacklist = _update_file(joinpath(f"{name}_blacklist.txt"), self._normalize_words)
 
         if name != "keyword" and self.keyword_regex:
             regex = chain(whitelist, blacklist, (self.keyword_regex,))
@@ -379,12 +379,12 @@ class Builder:
 
     def _keyword_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
         if not self._fetch and old_list:
-            return self._filter_regex(old_list)
+            return self._normalize_words(old_list)
         return set(chain(JavBusScraper.get_western(), JavDBScraper.get_western()))
 
     def _prefix_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
         if not self._fetch and old_list:
-            return self._filter_regex(old_list)
+            return self._normalize_words(old_list)
 
         result = set(self._mteam.get_id())
         for cls in JavBusScraper, JavDBScraper, GithubScraper:
@@ -396,7 +396,7 @@ class Builder:
         return (k for k, v in prefix_counter.items() if v >= _JAV_THRESH)
 
     @staticmethod
-    def _filter_regex(wordlist: Iterable[str]) -> Set[str]:
+    def _normalize_words(wordlist: Iterable[str]) -> Set[str]:
         return set(map(str.lower, filter(None, map(str.strip, wordlist))))
 
 
