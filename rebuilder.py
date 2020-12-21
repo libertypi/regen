@@ -111,8 +111,8 @@ class JavDBScraper(Scraper):
 
     @classmethod
     def get_western(cls):
+
         find_digit = re.compile(r"[0-9]+").search
-        matcher = re.compile(r"[A-Za-z0-9 ]+").fullmatch
 
         for a in cls._scrape(
             base=("series/western",),
@@ -124,9 +124,9 @@ class JavDBScraper(Scraper):
             except TypeError:
                 continue
             if freq > _WES_THRESH:
-                title = a.findtext("strong")
-                if matcher(title):
-                    yield title.replace(" ", "").lower()
+                title = a.findtext("strong").replace(" ", "")
+                if title.isalnum():
+                    yield title.lower()
 
 
 class GithubScraper(Scraper):
@@ -187,7 +187,7 @@ class MTeamScraper:
         pool = []
         idx = 0
         joinpath = subdir.joinpath
-        matcher = re.compile(r"\bid=([0-9]+)").search
+        matcher = re.compile(r"id=([0-9]+)").search
         url = urljoin(self.DOMAIN, self._pages[is_av])
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
 
@@ -349,10 +349,10 @@ class Builder:
         whitelist = _update_file(joinpath(f"{name}_whitelist.txt"), self._filter_regex)
         blacklist = _update_file(joinpath(f"{name}_blacklist.txt"), self._filter_regex)
 
-        if name == "keyword":
-            regex = chain(whitelist, blacklist)
-        else:
+        if name != "keyword" and self.keyword_regex:
             regex = chain(whitelist, blacklist, (self.keyword_regex,))
+        else:
+            regex = chain(whitelist, blacklist)
         wordlist = set(filterfalse(re.compile("|".join(regex)).fullmatch, wordlist))
 
         wordlist.update(whitelist)

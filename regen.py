@@ -40,7 +40,7 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from itertools import chain, compress, filterfalse
-from typing import Iterable
+from typing import Iterable, List
 
 from ortools.sat.python import cp_model
 
@@ -543,7 +543,7 @@ class Regen:
         self._tokens = frozenset(chain.from_iterable(map(Parser().parse, wordlist)))
         self._cache = {}
 
-    def to_text(self) -> list[str]:
+    def to_text(self) -> List[str]:
         """Extract the regular expressions to a list of corresponding words."""
         return sorted(map("".join, self._tokens))
 
