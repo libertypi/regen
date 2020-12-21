@@ -373,7 +373,7 @@ class Builder:
             print(f"{name}: Computed regex is {diff} characters longer than concatenation, use the latter.")
             return concat
 
-        regen.verify_result()
+        regen.raise_for_verify()
         print(f"{name} regex test passed, {-diff} characters saved.")
         return computed
 

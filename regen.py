@@ -536,13 +536,14 @@ class Regen:
         'XYZ|[AB]B[CD]'
         """
 
-        if not isinstance(wordlist, Iterable) or isinstance(wordlist, str):
+        if not isinstance(wordlist, Iterable):
             raise TypeError("Input should be a list of strings.")
-
+        if isinstance(wordlist, str):
+            wordlist = (wordlist,)
         self._tokens = frozenset(chain.from_iterable(map(Parser().parse, wordlist)))
         self._cache = {}
 
-    def to_text(self):
+    def to_text(self) -> list[str]:
         """Extract the regular expressions to a list of corresponding words."""
         return sorted(map("".join, self._tokens))
 
@@ -552,29 +553,24 @@ class Regen:
         :omitOuterParen: If True, the outmost parentheses (if any) will be omited.
         """
         if not isinstance(omitOuterParen, bool):
-            raise TypeError("omitOuterParen should be a bool.")
+            raise TypeError("omitOuterParen should be bool.")
 
-        try:
-            regex = self._cache[omitOuterParen]
-        except KeyError:
+        regex = self._cache.get(omitOuterParen)
+        if regex is None:
             regex = self._cache[omitOuterParen] = optimize(self._tokens, omitOuterParen)
-
         return regex
 
-    def verify_result(self):
-        try:
-            regex = next(iter(self._cache.values()))
-        except StopIteration:
+    def raise_for_verify(self):
+        regex = next(iter(self._cache.values()), None)
+        if regex is None:
             regex = self.to_regex()
 
-        if self._tokens != Regen([regex])._tokens:
+        if self._tokens != Regen(regex)._tokens:
             raise ValueError("Extraction from computed regex is different from that of original wordlist.")
 
         for i in filterfalse(re.compile(regex).fullmatch, self.to_text()):
             if _not_special(i):
                 raise ValueError(f"Computed regex does not fully match this word: '{i}'")
-
-        return True
 
 
 def parse_arguments():
@@ -668,7 +664,7 @@ def main():
             print("\nLength:", len(regex))
             print("Verifying... ", end="")
             try:
-                regen.verify_result()
+                regen.raise_for_verify()
             except ValueError as e:
                 print("failed:", e)
             else:
