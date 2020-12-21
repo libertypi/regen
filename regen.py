@@ -42,7 +42,7 @@ from functools import lru_cache
 from itertools import chain, compress, filterfalse
 from typing import Iterable, List
 
-from ortools.sat.python import cp_model
+from ortools.sat.python.cp_model import FEASIBLE, OPTIMAL, CpModel, CpSolver, LinearExpr
 
 _specials = frozenset("{}()[]|?*+")
 _not_special = _specials.isdisjoint
@@ -53,6 +53,7 @@ _split_token = re.compile(r"[^\\]|\\.").findall
 
 class Parser:
 
+    __slots__ = ("result", "hold", "charset", "index", "subParser", "token", "_string")
     _is_char_block = re.compile(r"\\?.|\[(\^?\])?([^]]|\\\])*\]").fullmatch
 
     def __init__(self) -> None:
@@ -300,13 +301,13 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
         return f"({string}){quantifier}" if quantifier else string
 
     result = []
+    prefix = defaultdict(set)
+    suffix = defaultdict(set)
+    mirror = defaultdict(list)
     segment = {}
     candidate = {}
     unvisitCand = set()
-    mirror = defaultdict(list)
     frozenUnion = frozenset().union
-    prefix = defaultdict(set)
-    suffix = defaultdict(set)
 
     for token in tokenSet:
         left = {token[:i]: token[i:] for i in range(1, len(token))}
@@ -462,7 +463,7 @@ def _optimize_group(unvisited: set, candidate: dict):
             yield currentKey
             continue
 
-        model = cp_model.CpModel()
+        model = CpModel()
         AddImplication = model.AddImplication
         pool[currentKey] = model.NewBoolVar("0")
         stack.append(currentKey)
@@ -485,16 +486,11 @@ def _optimize_group(unvisited: set, candidate: dict):
                     stack.append(nextKey)
                 AddImplication(nextVar, currentVarNot)
 
-        model.Maximize(
-            cp_model.LinearExpr.ScalProd(
-                pool.values(),
-                tuple(candidate[k][0] for k in pool),
-            )
-        )
+        model.Maximize(LinearExpr.ScalProd(pool.values(), tuple(candidate[k][0] for k in pool)))
 
-        solver = cp_model.CpSolver()
+        solver = CpSolver()
         status = solver.Solve(model)
-        if status != cp_model.OPTIMAL and status != cp_model.FEASIBLE:
+        if status != OPTIMAL and status != FEASIBLE:
             raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
         yield from compress(pool, map(solver.BooleanValue, pool.values()))
