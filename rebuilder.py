@@ -80,7 +80,7 @@ class JavBusScraper(Scraper):
 
     @classmethod
     def get_western(cls):
-        matcher = re.compile(r"\s*([A-Za-z0-9]+)(?:\.\d\d){3}\s*").fullmatch
+        matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
 
         result = cls._scrape(
             base="https://www.javbus.org/",
@@ -113,6 +113,7 @@ class JavDBScraper(Scraper):
     def get_western(cls):
 
         find_digit = re.compile(r"[0-9]+").search
+        matcher = re.compile(r"[A-Za-z0-9]{3,}").fullmatch
 
         for a in cls._scrape(
             base=("series/western",),
@@ -125,7 +126,7 @@ class JavDBScraper(Scraper):
                 continue
             if freq > _WES_THRESH:
                 title = a.findtext("strong").replace(" ", "")
-                if title.isalnum():
+                if matcher(title):
                     yield title.lower()
 
 
