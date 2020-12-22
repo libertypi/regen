@@ -532,10 +532,11 @@ class Regen:
         'XYZ|[AB]B[CD]'
         """
 
-        if not isinstance(wordlist, Iterable):
-            raise TypeError("Input should be a list of strings.")
         if isinstance(wordlist, str):
             wordlist = (wordlist,)
+        elif not isinstance(wordlist, Iterable):
+            raise TypeError("Input should be a list of strings.")
+
         self._tokens = frozenset(chain.from_iterable(map(Parser().parse, wordlist)))
         self._cache = {}
 
