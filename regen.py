@@ -22,7 +22,7 @@ for internal uses only.
     >>> wordlist = ['[AB]B[CD]', 'XYZ']
     >>> regen = Regen(wordlist)
 
-    >>> regen.to_text()
+    >>> regen.to_words()
     ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
 
     >>> regen.to_regex()
@@ -508,7 +508,7 @@ class Regen:
         - `wordlist`: an iterable of strings.
 
         ### Methods:
-        - `to_text`: Extract the regular expressions to a list of corresponding words.
+        - `to_words`: Extract the regular expressions to a list of corresponding words.
         - `to_regex`: Return an optimized regular expression matching all the words.
 
         ### Examples:
@@ -522,7 +522,7 @@ class Regen:
         >>> wordlist = ['[AB]B[CD]', 'XYZ']
         >>> regen = Regen(wordlist)
 
-        >>> regen.to_text()
+        >>> regen.to_words()
         ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
 
         >>> regen.to_regex()
@@ -540,7 +540,7 @@ class Regen:
         self._tokens = frozenset(chain.from_iterable(map(Parser().parse, wordlist)))
         self._cache = {}
 
-    def to_text(self) -> List[str]:
+    def to_words(self) -> List[str]:
         """Extract the regular expressions to a list of corresponding words."""
         return sorted(map("".join, self._tokens))
 
@@ -565,7 +565,7 @@ class Regen:
         if self._tokens != Regen(regex)._tokens:
             raise ValueError("Extraction from computed regex is different from that of original wordlist.")
 
-        for i in filterfalse(re.compile(regex).fullmatch, self.to_text()):
+        for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
             if _not_special(i):
                 raise ValueError(f"Computed regex does not fully match this word: '{i}'")
 
@@ -650,7 +650,7 @@ def main():
     regen = Regen(wordlist)
 
     if args.mode == "extract":
-        for word in regen.to_text():
+        for word in regen.to_words():
             print(word)
 
     else:
