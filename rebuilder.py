@@ -390,10 +390,11 @@ class Builder:
         for cls in JavBusScraper, JavDBScraper, GithubScraper:
             result.update(cls.get_id())
 
-        prefix_counter = Counter(map(itemgetter(0), result))
-        print(f"Uniq ID: {len(result)}. Uniq prefix: {len(prefix_counter)}.")
+        c = len(result)
+        result = Counter(map(itemgetter(0), result))
+        print(f"Uniq ID: {c}. Uniq prefix: {len(result)}.")
 
-        return (k for k, v in prefix_counter.items() if v >= _JAV_THRESH)
+        return (k for k, v in result.items() if v >= _JAV_THRESH)
 
     @staticmethod
     def _normalize_words(wordlist: Iterable[str]) -> Set[str]:
@@ -405,27 +406,24 @@ def _update_file(file: Path, stragety: Callable[[Iterable[str]], Iterable[str]])
     try:
         with open(file, "r+", encoding="utf-8") as f:
             old_list = f.read().splitlines()
-            result = sorted(stragety(old_list))
-            if old_list != result:
+            new_list = sorted(stragety(old_list))
+            if old_list != new_list:
                 f.seek(0)
-                f.writelines(i + "\n" for i in result)
+                f.writelines(i + "\n" for i in new_list)
                 f.truncate()
                 print(f"{file} updated.")
 
     except FileNotFoundError:
-        result = sorted(stragety([]))
+        new_list = sorted(stragety([]))
         file.parent.mkdir(parents=True, exist_ok=True)
         with open(file, mode="w", encoding="utf-8") as f:
-            f.writelines(i + "\n" for i in result)
+            f.writelines(i + "\n" for i in new_list)
         print(f"{file} created.")
 
-    return result
+    return new_list
 
 
 class Analyzer:
-
-    _video_re = r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$"
-
     def __init__(self, regex_file: str, report_dir: str, mteam: MTeamScraper, fetch: bool) -> None:
 
         self._report_dir = Path(report_dir)
@@ -439,7 +437,10 @@ class Analyzer:
 
         p = regex.index("(", 1)
         self._av_matcher = re.compile(f"{regex[:p]}(?P<m>{regex[p+1:]}", flags=re.M).search
-        self._video_filter = re.compile(self._video_re, flags=re.M).search
+        self._video_filter = re.compile(
+            r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
+            flags=re.M,
+        ).search
 
     def analyze_av(self):
 

@@ -1,5 +1,5 @@
-((1[0-2]|0[1-9])(3[01]|[12][0-9]|0[1-9])[0-2][0-9]|(1[0-6]|0[89])(1[0-2]|0[1-9])(3[01]|[12][0-9]|0[1-9]))[_-][0-9]{2,4}
 (1[0-6]|09)(1[0-2]|0[1-9])(3[01]|[12][0-9]|0[1-9])[_-][a-z]{3,7}
+(3[01]|[12][0-9]|0[1-9]){3}[_-][0-9]{2,4}
 (5k|amateur|wow|girlsdo|teensdo|virtualreal|western)porn
 (atk|tonights|cruel) ?girlfriends?
 (bigbutt|milf|pornstar|teen)slikeitbig
@@ -8,6 +8,7 @@
 (ftv|wow|t)girls
 (lethal|party|handson) ?hardcore
 (mkb?d|bd)[_-][sm][0-9]{2,3}
+(nubile|girlfriends|ultra)films
 (n|kb?)[0-2][0-9]{3}
 (true|elegant|girlstry)anal
 1000 ?giri
@@ -28,10 +29,11 @@ black(ed(raw)?|sonblondes)
 blow(bang| ?jobs?|pass)
 brazzers
 capturbate
-carib(bean(com)?)?(pr)?
+carib(beancom)?(pr)?
 chaturbate
+clubseventeen
 cream ?pie[sd]?
-czech(av|massage|solarium|toilets)
+czech(av|massage|solarium|toilets|vr)
 ddfnetwork
 defloration
 devils ?film
@@ -58,6 +60,7 @@ heydouga[0-9]*
 heyzo
 honnamatv
 hotcrazymess
+immorallive
 inthe(crack|vip)
 japanhdv
 jukujo
@@ -80,7 +83,7 @@ pervcity
 playboyplus
 porn(hub|pros|megaload|world|18|o|fidelity)?
 public ?agent
-reality ?kings
+reality ?(king|junkie)s
 sellyourgf
 sex[ -]?art
 sharemybf
@@ -93,10 +96,9 @@ th101
 threesome
 tokyo[ _-]?hot
 tushy(raw)?
-ultrafilms
 vixen
 wakeupnfuck
-wankitnow
+wankitnow(vr)?
 x-?(sensual|art|angels)
 x1x
 xxx(av)?
