@@ -480,9 +480,10 @@ class Analyzer:
                     word_counter.update(tmp)
                     tmp.clear()
 
-        stat = self._get_stat("Match", total, total - unmatched)
-        freq_words = get_freq_words()
+        brief = self._get_brief("Match", total, total - unmatched)
+        print(brief)
 
+        freq_words = get_freq_words()
         result = [
             (i, len(v), k, set(v))
             for k, v in flat_counter.items()
@@ -494,7 +495,8 @@ class Analyzer:
         words.sort(reverse=True)
 
         with open(unmatch_freq, "w", encoding="utf-8") as f:
-            f.write(stat + "\n\n")
+            f.write(brief)
+            f.write("\n\n")
 
             f.write("Potential ID Prefixes:\n\n")
             f.writelines(self._format_report(result))
@@ -503,7 +505,6 @@ class Analyzer:
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
-        print(stat)
         print(f"Result saved to: {unmatch_freq}")
 
     def analyze_non_av(self):
@@ -536,15 +537,17 @@ class Analyzer:
                     torrent_counter.update(tmp)
                     tmp.clear()
 
-        stat = self._get_stat("Mismatch", total, mismatched)
+        brief = self._get_brief("Mismatch", total, mismatched)
+        print(brief)
+
         result = [(torrent_counter[k], len(v), k, set(v)) for k, v in flat_counter.items()]
         result.sort(reverse=True)
 
         with open(mismatched_file, "w", encoding="utf-8") as f:
-            f.write(stat + "\n\n")
+            f.write(brief)
+            f.write("\n\n")
             f.writelines(self._format_report(result))
 
-        print(stat)
         print(f"Result saved to: {mismatched_file}")
 
     def _match_av(self, path: Path) -> Optional[str]:
@@ -558,7 +561,7 @@ class Analyzer:
             return tuple(m["m"] for m in map(self._av_matcher, filter(self._video_filter, f)) if m)
 
     @staticmethod
-    def _get_stat(name: str, total: int, n: int):
+    def _get_brief(name: str, total: int, n: int):
         return f"Total: {total}. {name}: {n}. Percentage: {n / total:.2%}."
 
     @staticmethod
