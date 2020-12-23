@@ -40,7 +40,7 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from itertools import chain, compress, filterfalse
-from typing import Iterable, List
+from typing import Dict, FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 from ortools.sat.python.cp_model import FEASIBLE, OPTIMAL, CpModel, CpSolver, LinearExpr
 
@@ -49,11 +49,12 @@ _not_special = _specials.isdisjoint
 _rangeChars = frozenset("0123456789,")
 _repetitions = frozenset("*?+{")
 _split_token = re.compile(r"[^\\]|\\.").findall
+Token = Tuple[str]
 
 
 class Parser:
 
-    __slots__ = ("result", "hold", "charset", "index", "subParser", "token", "_string")
+    __slots__ = ("result", "hold", "charset", "index", "subParser", "token", "_input")
     _is_char_block = re.compile(r"\\?.|\[(\^?\])?([^]]|\\\])*\]").fullmatch
 
     def __init__(self) -> None:
@@ -63,15 +64,15 @@ class Parser:
         self.index = 0
         self.subParser = self.token = None
 
-    def parse(self, string):
+    def parse(self, _input: Union[str, List[str]]) -> Iterator[Token]:
         """Convert a regular expression to a tokenset."""
 
         try:
-            token = _split_token(string)
+            token = _split_token(_input)
         except TypeError:
-            if not isinstance(string, list):
-                raise TypeError(f"Wrong type feed to Parser: {string}")
-            token = string
+            if not isinstance(_input, list):
+                raise TypeError(f"Wrong type feed to Parser: {_input}")
+            token = _input
 
         if _not_special(token):  # Not regex we can handle
             yield tuple(token)
@@ -81,7 +82,7 @@ class Parser:
             raise RuntimeError("Parser is not idle.")
 
         self.token = token
-        self._string = string
+        self._input = _input
 
         hold = self.hold
         eat = self._eat
@@ -120,7 +121,7 @@ class Parser:
         yield from map(tuple, self.result)
         self._reset_result()
         self.index = 0
-        self.token = self._string = None
+        self.token = self._input = None
 
     def _charsetStrategy(self):
         start = self.index - 1  # including "["
@@ -222,7 +223,7 @@ class Parser:
         self.result.clear()
         self.result.append([])
 
-    def _eat(self):
+    def _eat(self) -> Optional[str]:
         """Consume one character in the token list."""
         try:
             char = self.token[self.index]
@@ -231,13 +232,13 @@ class Parser:
         except IndexError:
             pass
 
-    def _peek(self):
+    def _peek(self) -> Optional[str]:
         try:
             return self.token[self.index]
         except IndexError:
             pass
 
-    def _eat_suffix(self):
+    def _eat_suffix(self) -> Optional[str]:
         char = self._peek()
         if char not in _repetitions:
             return
@@ -267,14 +268,11 @@ class Parser:
 
     @property
     def string(self):
-        try:
-            return self._string if isinstance(self._string, str) else "".join(self._string)
-        except TypeError:
-            pass
+        return self._input if isinstance(self._input, str) else "".join(self._input)
 
 
 @lru_cache(maxsize=4096)
-def optimize(tokenSet: frozenset, omitOuterParen: bool = False) -> str:
+def optimize(tokenSet: FrozenSet[Token], omitOuterParen: bool = False) -> str:
     """Compute an optimized regular expression from the given tokenset."""
 
     tokenSet = set(tokenSet)
@@ -293,7 +291,7 @@ def optimize(tokenSet: frozenset, omitOuterParen: bool = False) -> str:
         return ""
 
 
-def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
+def _wordStrategy(tokenSet: Set[Token], quantifier: str, omitOuterParen: bool) -> str:
 
     tokenSetLength = len(tokenSet)
     if tokenSetLength == 1:
@@ -393,7 +391,7 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
     return string
 
 
-def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
+def _charsetStrategy(tokenSet: Set[Token], quantifier: str = "") -> str:
 
     if len(tokenSet) > 1:
         char = sorted(chain.from_iterable(tokenSet))
@@ -409,11 +407,11 @@ def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
 
 
 @lru_cache(maxsize=512)
-def _is_word(token: tuple):
+def _is_word(token: Token) -> bool:
     return sum(map(len, token)) > 1
 
 
-def _filter_affix(d: dict, intersect: set = None):
+def _filter_affix(d: Dict[Token, Set[Token]], intersect: Set[Token] = None) -> Dict[Token, Set[Token]]:
     """Keep groups which divide the same words at max common subsequence,
     and remove single member groups.
 
@@ -432,17 +430,16 @@ def _filter_affix(d: dict, intersect: set = None):
             n = len(k)
             if key not in tmp or tmp[key][0] < n:
                 tmp[key] = n, k
-
     return {k: d[k] for _, k in tmp.values()}
 
 
-def _intersect_affix(d: dict, r: set):
+def _intersect_affix(d: Dict[Token, Set[Token]], r: Set[Token]) -> Iterator[Tuple[Token, Set[Token]]]:
     for i in d.items():
         i[1].intersection_update(r)
         yield i
 
 
-def _optimize_group(unvisited: set, candidate: dict):
+def _optimize_group(unvisited: Set[FrozenSet[Token]], candidate: Dict[FrozenSet[Token], Tuple[int, str]]):
     """Divide candidates into groups that each group is internally connected
     with common members. Then for each group, find the best non-overlapping
     members to reach the maximum length reduction.
@@ -642,30 +639,26 @@ def main():
     args = parse_arguments()
 
     if args.file is None:
-        wordlist = args.word
+        regen = Regen(args.word)
     else:
-        wordlist = filter(None, args.file.read().splitlines())
+        regen = Regen(filter(None, args.file.read().splitlines()))
         args.file.close()
-
-    regen = Regen(wordlist)
 
     if args.mode == "extract":
         for word in regen.to_words():
             print(word)
-
     else:
         regex = regen.to_regex(omitOuterParen=args.omit)
         print(regex)
 
         if args.verify:
             print("\nLength:", len(regex))
-            print("Verifying... ", end="")
             try:
                 regen.raise_for_verify()
             except ValueError as e:
-                print("failed:", e)
+                print("Verify failed:", e)
             else:
-                print("passed.")
+                print("Verify passed.")
 
 
 if __name__ == "__main__":
