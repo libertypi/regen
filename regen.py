@@ -84,7 +84,7 @@ class Parser:
         self.token = token
         self._input = _input
 
-        hold = self.hold
+        hold_append = self.hold.append
         eat = self._eat
         eatsuffix = self._eat_suffix
 
@@ -108,12 +108,12 @@ class Parser:
             else:
                 suffix = eatsuffix()
                 if not suffix:
-                    hold.append(char)
+                    hold_append(char)
                 elif suffix == "?":
                     self._concat_hold()
                     self.result.extend(tuple([*x, char] for x in self.result))
                 else:
-                    hold.append(char + suffix)
+                    hold_append(char + suffix)
 
             char = eat()
 
@@ -148,7 +148,7 @@ class Parser:
                     raise ValueError(f"Nested character set: {self.string}")
                 if char == "]" and charset:
                     break
-                elif char == "-" and self._peek() != "]":
+                if char == "-" and self._peek() != "]":
                     try:
                         lo = charset.pop()
                         hi = eat()
