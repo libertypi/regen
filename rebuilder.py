@@ -52,27 +52,29 @@ class Scraper:
 class JavBusScraper(Scraper):
     @staticmethod
     def _scrape(
-        base: str = "https://www.javbus.com/",
-        paths: Iterable[str] = ("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"),
+        base="https://www.javbus.com/",
+        paths=("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"),
     ) -> Iterator[str]:
 
         print(f"Scanning {base}...")
-        parser = _get_downloader(
+        downloader = _get_downloader(
             XPath('.//div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()', smart_strings=False),
             raise_404=True,
         )
         step = 500
 
         with ThreadPoolExecutor(max_workers=None) as ex:
-            for p in paths:
+            for path in paths:
                 lo = 1
-                print(f"  /{p}: ", end="", flush=True)
+                print(f"  /{path}: ", end="", flush=True)
 
                 while True:
                     hi = lo + step
                     print(f"{lo}:{hi}..", end="", flush=True)
                     try:
-                        yield from chain.from_iterable(ex.map(parser, (f"{base}/{p}/{i}" for i in range(lo, hi))))
+                        yield from chain.from_iterable(
+                            ex.map(downloader, (f"{base}/{path}/{page}" for page in range(lo, hi)))
+                        )
                     except LastPageReached:
                         break
                     lo = hi
@@ -81,53 +83,59 @@ class JavBusScraper(Scraper):
     @classmethod
     def get_western(cls):
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
+        freq_words = get_freq_words()
 
         result = cls._scrape(
             base="https://www.javbus.org/",
             paths=("page", *(f"studio/{i}" for i in range(1, 5))),
         )
         result = Counter(m[1].lower() for m in map(matcher, result) if m)
+
         for k, v in result.items():
-            if v > _WES_THRESH:
+            if v > _WES_THRESH and k not in freq_words:
                 yield k
 
 
 class JavDBScraper(Scraper):
     @staticmethod
-    def _scrape(
-        base=("uncensored", ""),
-        limit: int = 81,
-        xpath: str = './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
-    ) -> Iterator[str]:
+    def _scrape(paths=("uncensored", ""), limit: int = 81, xpath: Callable = None) -> Iterator[str]:
 
         print(f"Scanning javdb...")
-        parser = _get_downloader(XPath(xpath, smart_strings=False))
+
+        if not xpath:
+            xpath = XPath(
+                './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
+                smart_strings=False,
+            )
+        downloader = _get_downloader(xpath)
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
-                ex.submit(parser, f"https://javdb.com/{b}?page={i}") for i in range(1, limit) for b in base
+                ex.submit(downloader, f"https://javdb.com/{path}?page={page}")
+                for page in range(1, limit)
+                for path in paths
             )
             yield from chain.from_iterable(map(methodcaller("result"), fts))
 
     @classmethod
     def get_western(cls):
 
-        find_digit = re.compile(r"[0-9]+").search
-        matcher = re.compile(r"[A-Za-z0-9]{3,}").fullmatch
+        xpath = XPath(
+            f"""
+            //div[@id="series"]//div[@class="box"]
+            /a[@title and re:match(span/text(), "[0-9]+") > {_WES_THRESH}]
+            /strong/text()
+            """,
+            namespaces={"re": "http://exslt.org/regular-expressions"},
+            smart_strings=False,
+        )
+        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
+        freq_words = get_freq_words()
 
-        for a in cls._scrape(
-            base=("series/western",),
-            limit=5,
-            xpath='.//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
-        ):
-            try:
-                freq = int(find_digit(a.findtext("span"))[0])
-            except TypeError:
-                continue
-            if freq > _WES_THRESH:
-                title = a.findtext("strong").replace(" ", "")
-                if matcher(title):
-                    yield title.lower()
+        for title in cls._scrape(paths=("series/western",), limit=5, xpath=xpath):
+            title = title.replace(" ", "").lower()
+            if title not in freq_words and matcher(title):
+                yield title
 
 
 class GithubScraper(Scraper):
@@ -193,14 +201,24 @@ class MTeamScraper:
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
 
         if cjk_title_only:
-            parser = self._get_cjk_parser()
+            xpath = XPath(
+                r"""
+                //form[@id="form_torrent"]
+                //table[@class="torrentname"
+                    and descendant::a[contains(@href, "details.php?")]
+                    //text()[re:test(., "[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7a3]")]
+                ]/descendant::a[contains(@href, "download.php?")][1]/@href
+                """,
+                namespaces={"re": "http://exslt.org/regular-expressions"},
+                smart_strings=False,
+            )
         else:
-            parser = XPath(
-                './/form[@id="form_torrent"]//table[@class="torrentname"]'
+            xpath = XPath(
+                '//form[@id="form_torrent"]//table[@class="torrentname"]'
                 '/descendant::a[contains(@href, "download.php?")][1]/@href',
                 smart_strings=False,
             )
-        parser = _get_downloader(parser)
+        downloader = _get_downloader(xpath)
 
         print(f"Scanning mteam ({self._limit} pages)...", end="", flush=True)
         if not self._logined:
@@ -208,7 +226,7 @@ class MTeamScraper:
 
         with ThreadPoolExecutor(max_workers=None) as ex:
 
-            for ft in as_completed(ex.submit(parser, url, params={"page": i}) for i in range(1, self._limit + 1)):
+            for ft in as_completed(ex.submit(downloader, url, params={"page": i}) for i in range(1, self._limit + 1)):
 
                 idx += 1
                 if not idx % step:
@@ -241,42 +259,6 @@ class MTeamScraper:
             )
             res.raise_for_status()
         self._logined = True
-
-    @staticmethod
-    def _get_cjk_parser():
-        title_xp = XPath(
-            'descendant::a[*//text() and contains(@href, "details.php?")][1]//text()',
-            smart_strings=False,
-        )
-        link_xp = XPath(
-            'descendant::a[contains(@href, "download.php?")][1]/@href',
-            smart_strings=False,
-        )
-
-        cjk = 0
-        for i, j in (
-            (4352, 4607),
-            (11904, 42191),
-            (43072, 43135),
-            (44032, 55215),
-            (63744, 64255),
-            (65072, 65103),
-            (65381, 65500),
-            (131072, 196607),
-        ):
-            cjk |= (1 << j + 1) - (1 << i)
-
-        def _parser(tree: HtmlElement) -> List[str]:
-            result = []
-            for table in tree.iterfind('.//form[@id="form_torrent"]//table[@class="torrentname"]'):
-                try:
-                    if any(1 << ord(c) & cjk for c in title_xp(table)[0]):
-                        result.extend(link_xp(table))
-                except IndexError:
-                    pass
-            return result
-
-        return _parser
 
     @staticmethod
     def _dl_torrent(link: str, path: Path) -> Path:
@@ -604,16 +586,20 @@ def _get_downloader(func: Callable[[HtmlElement], List[str]], raise_404: bool = 
     return downloader
 
 
-def get_freq_words(lb: int = 3, ub: int = 6, n: int = 1000):
+_freq_words = None
 
-    freq_words = _request(
-        "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    ).text
-    freq_words = islice(re.finditer(f"^[A-Za-z]{{{lb},{ub}}}$", freq_words, flags=re.M), n)
-    freq_words = frozenset(map(str.lower, map(itemgetter(0), freq_words)))
-    assert len(freq_words) == n, "fetching frequent words failed"
 
-    return freq_words
+def get_freq_words():
+    """Get wordlist of the top 3000 English words which longer than 3 letters."""
+
+    global _freq_words
+    if not _freq_words:
+        result = _request(
+            "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+        ).text
+        result = islice(re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.M), 3000)
+        _freq_words = frozenset(map(str.lower, map(itemgetter(1), result)))
+    return _freq_words
 
 
 def parse_config(configfile: str):

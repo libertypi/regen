@@ -23,6 +23,7 @@ acc
 acgjv
 acme
 acy
+acz
 adbs
 add
 aden
@@ -219,6 +220,7 @@ bdd
 bdmds
 bdmild
 bdr
+bdsm
 bdsr
 beb
 bebe
@@ -419,7 +421,6 @@ coch
 cohi
 cold
 com
-con
 cona
 corb
 core
@@ -611,6 +612,7 @@ dksb
 dksw
 dktd
 dktm
+dkwt
 dkye
 dkyf
 dkyh
@@ -915,6 +917,7 @@ fuga
 ful
 fxd
 fzk
+fzr
 gachi
 gachig
 gachip
@@ -1028,6 +1031,7 @@ gqr
 gqs
 grch
 grd
+gredb
 grgr
 grkg
 grmo
@@ -1166,7 +1170,6 @@ hon
 honb
 hone
 hos
-hotvr
 hpd
 hpf
 hpl
@@ -1209,6 +1212,7 @@ hyrd
 hzd
 hzgb
 hzgd
+hzmen
 hzok
 iabh
 ianf
@@ -1446,13 +1450,11 @@ kiri
 kisd
 kitd
 kiwvr
-kizn
 kjc
 kjn
 kkbd
 kkj
 kkrd
-kktn
 kmad
 kmbe
 kmds
@@ -1547,6 +1549,7 @@ kws
 kwsd
 kyk
 kyod
+kyun
 labb
 laco
 lads
@@ -2305,7 +2308,6 @@ qrda
 qrdc
 qrdd
 qrdf
-qrvr
 queen
 qvg
 qxl
@@ -2865,6 +2867,7 @@ ttf
 ttkk
 ttrb
 tts
+tttv
 ttyu
 tue
 tujd
