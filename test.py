@@ -3,7 +3,7 @@
 import os.path
 import unittest
 
-from regenerator import Regen, Parser
+from Regen import Regen, Parser
 
 
 class Testregen(unittest.TestCase):

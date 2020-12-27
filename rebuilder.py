@@ -686,16 +686,17 @@ def _init_session(session_file: Path):
     try:
         with open(session_file, "rb") as f:
             session = pickle.load(f)
+    except (OSError, pickle.PickleError):
+        pass
+    else:
+        if isinstance(session, Session):
+            return
 
-        if not isinstance(session, Session):
-            raise ValueError
-
-    except (OSError, pickle.PickleError, ValueError):
-        session = Session()
-        session.cookies.set_cookie(create_cookie(domain="www.javbus.com", name="existmag", value="all"))
-        session.headers.update(
-            {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"}
-        )
+    session = Session()
+    session.cookies.set_cookie(create_cookie(domain="www.javbus.com", name="existmag", value="all"))
+    session.headers.update(
+        {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"}
+    )
 
 
 def _save_session(session_file: Path):
