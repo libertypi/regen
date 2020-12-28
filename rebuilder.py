@@ -168,7 +168,7 @@ class MTeamScraper:
             ([a-z]{3,6})
             (-)?
             0*([1-9][0-9]{,3})
-            (?(2)(?:hhb[0-9]*)?|hhb[0-9]*)
+            (?(2)(?:[hm]hb[0-9]{,2})?|[hm]hb[0-9]{,2})
             \b.*\.(?:mp4|wmv|avi|mkv|iso)$
             """,
             flags=re.MULTILINE | re.VERBOSE,
@@ -434,7 +434,9 @@ class Analyzer:
         total = unmatched = 0
         sep = "-" * 80 + "\n"
 
-        prefix_finder = re.compile(r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:hhb[0-9]*)?)\b.*$", flags=re.M).findall
+        prefix_finder = re.compile(
+            r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:[hm]hb[0-9]{,2})?)\b.*$", flags=re.M
+        ).findall
         word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
 
         flat_counter = defaultdict(list)
