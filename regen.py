@@ -424,12 +424,14 @@ def _filter_affix(d: Dict[Token, Set[Token]], intersect: Set[Token] = None) -> D
         stream = _intersect_affix(d, intersect)
 
     tmp = {}
+    setdefault = tmp.setdefault
     for k, v in stream:
         if len(v) > 1:
             key = frozenset(v)
-            n = len(k)
-            if key not in tmp or tmp[key][0] < n:
-                tmp[key] = n, k
+            val = len(k), k
+            if setdefault(key, val) < val:
+                tmp[key] = val
+
     return {k: d[k] for _, k in tmp.values()}
 
 

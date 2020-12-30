@@ -363,8 +363,10 @@ cdc
 cdrp
 cdrpbd
 cead
+cehd
 cele
 cen
+cend
 cent
 cesd
 cetd
@@ -860,6 +862,7 @@ fgan
 finh
 fis
 fiv
+fjh
 fjl
 fkt
 fkw
@@ -1210,7 +1213,6 @@ hyrd
 hzd
 hzgb
 hzgd
-hzmen
 hzok
 iabh
 ianf
@@ -2009,6 +2011,7 @@ njpds
 njvr
 njwp
 nkd
+nkk
 nkkd
 nkrs
 nksd
@@ -2046,7 +2049,6 @@ nsm
 nsps
 nsr
 nssth
-nsstl
 nsstn
 nsv
 ntd
@@ -2741,6 +2743,7 @@ tek
 tem
 ten
 tenk
+tenv
 tenx
 tera
 tga
@@ -2952,7 +2955,6 @@ vicd
 vida
 video
 vikg
-vio
 vip
 vipd
 vipr
