@@ -40,7 +40,17 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from itertools import chain, compress, filterfalse
-from typing import Dict, FrozenSet, Iterable, Iterator, List, Optional, Set, Tuple, Union
+from typing import (
+    Dict,
+    FrozenSet,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 from ortools.sat.python.cp_model import FEASIBLE, OPTIMAL, CpModel, CpSolver, LinearExpr
 
@@ -71,19 +81,20 @@ class Parser:
             token = _split_token(_input)
         except TypeError:
             if not isinstance(_input, list):
-                raise TypeError(f"Wrong type feed to Parser: {_input}")
+                raise TypeError(f"Wrong type feed to Parser: {type(_input)}")
             token = _input
 
         if _not_special(token):  # Not regex we can handle
             yield tuple(token)
             return
 
-        if self.token is not None:
+        if self.index != 0:
             raise RuntimeError("Parser is not idle.")
 
         self.token = token
         self._input = _input
 
+        result = self.result
         hold_append = self.hold.append
         eat = self._eat
         eatsuffix = self._eat_suffix
@@ -91,19 +102,21 @@ class Parser:
         char = eat()
         while char:
 
-            if char == "|":
-                self._concat_hold()
-                yield from map(tuple, self.result)
-                self._reset_result()
+            if char in _specials:
 
-            elif char == "[":
-                self._charsetStrategy()
+                if char == "|":
+                    self._concat_hold()
+                    yield from map(tuple, result)
+                    result[:] = [[]]
 
-            elif char == "(":
-                self._parenStrategy()
+                elif char == "[":
+                    self._charsetStrategy()
 
-            elif char in _specials:
-                raise ValueError(f"Invalid character '{char}': '{self.string}'")
+                elif char == "(":
+                    self._parenStrategy()
+
+                else:
+                    raise ValueError(f"Invalid character '{char}': '{self.string}'")
 
             else:
                 suffix = eatsuffix()
@@ -111,20 +124,22 @@ class Parser:
                     hold_append(char)
                 elif suffix == "?":
                     self._concat_hold()
-                    self.result.extend(tuple([*x, char] for x in self.result))
+                    result.extend([*x, char] for x in tuple(result))
                 else:
                     hold_append(char + suffix)
 
             char = eat()
 
         self._concat_hold()
-        yield from map(tuple, self.result)
-        self._reset_result()
+        yield from map(tuple, result)
+        result[:] = [[]]
         self.index = 0
         self.token = self._input = None
 
     def _charsetStrategy(self):
+
         start = self.index - 1  # including "["
+        result = self.result
         hold = self.hold
         eat = self._eat
         charset = self.charset
@@ -144,17 +159,21 @@ class Parser:
             charset.append(char)
         else:
             while char:
-                if char == "[":
-                    raise ValueError(f"Nested character set: {self.string}")
-                if char == "]" and charset:
-                    break
-                if char == "-" and self._peek() != "]":
-                    try:
-                        lo = charset.pop()
-                        hi = eat()
-                        char = f"[{lo}{char}{hi}]"
-                    except IndexError:  # "-" is the first char in charset
-                        pass
+                if char in "]-[":
+                    if char == "]":
+                        if charset:
+                            break
+                    elif char == "-":
+                        if self._peek() != "]":
+                            try:
+                                lo = charset.pop()
+                                hi = eat()
+                                char = f"[{lo}{char}{hi}]"
+                            except IndexError:
+                                # "-" is the first char in charset
+                                pass
+                    else:
+                        raise ValueError(f"Nested character set: {self.string}")
                 charset.append(char)
                 char = eat()
             else:
@@ -164,13 +183,13 @@ class Parser:
 
         if not suffix:
             if len(charset) > 1:
-                self.result = [[*x, *hold, y] for x in self.result for y in charset]
+                result[:] = ([*x, *hold, y] for x in result for y in charset)
                 hold.clear()
             else:
                 hold.extend(charset)
         elif suffix == "?":
             self._concat_hold()
-            self.result.extend(tuple([*x, y] for x in self.result for y in charset))
+            result.extend([*x, y] for x in tuple(result) for y in charset)
         else:
             end = self.index  # from "[" to the end of suffix
             char = self._join_slice(start, end)
@@ -180,16 +199,18 @@ class Parser:
     def _parenStrategy(self):
 
         start = self.index  # 1 char after "("
+        result = self.result
         hold = self.hold
 
         balance = 1
         for end, char in enumerate(self.token[start:], start):
-            if char == "(":
-                balance += 1
-            elif char == ")":
-                balance -= 1
-                if balance == 0:
-                    break
+            if char in "()":
+                if char == "(":
+                    balance += 1
+                else:
+                    balance -= 1
+                    if balance == 0:
+                        break
         else:
             raise ValueError(f"Unbalanced parenthesis: {self.string}")
 
@@ -203,14 +224,18 @@ class Parser:
         subToken = self.subParser.parse(self.token[start:end])
 
         if not suffix:
-            self.result = [[*x, *hold, *y] for y in subToken for x in self.result]
+            result[:] = ([*x, *hold, *y] for y in subToken for x in result)
             hold.clear()
         elif suffix == "?":
             self._concat_hold()
-            self.result.extend(tuple([*x, *y] for y in subToken for x in self.result))
+            result.extend(tuple([*x, *y] for y in subToken for x in result))
         else:
             substr = optimize(frozenset(subToken), omitOuterParen=True)
-            hold.append(substr + suffix if self._is_char_block(substr) else f"({substr}){suffix}")
+            hold.append(
+                substr + suffix
+                if self._is_char_block(substr)
+                else f"({substr}){suffix}"
+            )
 
     def _concat_hold(self):
         hold = self.hold
@@ -218,10 +243,6 @@ class Parser:
             for s in self.result:
                 s.extend(hold)
             hold.clear()
-
-    def _reset_result(self):
-        self.result.clear()
-        self.result.append([])
 
     def _eat(self) -> Optional[str]:
         """Consume one character in the token list."""
@@ -246,7 +267,8 @@ class Parser:
         suffixStart = self.index  # first char of suffix
         if char == "{":
             try:
-                suffixEnd = self.token.index("}", suffixStart + 2)  # +2 so "{}" will not be matched
+                # +2 so "{}" will not be matched
+                suffixEnd = self.token.index("}", suffixStart + 2)
                 if not _rangeChars.issuperset(self.token[suffixStart + 1 : suffixEnd]):
                     raise ValueError
             except ValueError:
@@ -411,7 +433,9 @@ def _is_word(token: Token) -> bool:
     return sum(map(len, token)) > 1
 
 
-def _filter_affix(d: Dict[Token, Set[Token]], intersect: Set[Token] = None) -> Dict[Token, Set[Token]]:
+def _filter_affix(
+    d: Dict[Token, Set[Token]], intersect: Set[Token] = None
+) -> Dict[Token, Set[Token]]:
     """Keep groups which divide the same words at max common subsequence,
     and remove single member groups.
 
@@ -435,13 +459,17 @@ def _filter_affix(d: Dict[Token, Set[Token]], intersect: Set[Token] = None) -> D
     return {k: d[k] for _, k in tmp.values()}
 
 
-def _intersect_affix(d: Dict[Token, Set[Token]], r: Set[Token]) -> Iterator[Tuple[Token, Set[Token]]]:
+def _intersect_affix(
+    d: Dict[Token, Set[Token]], r: Set[Token]
+) -> Iterator[Tuple[Token, Set[Token]]]:
     for i in d.items():
         i[1].intersection_update(r)
         yield i
 
 
-def _optimize_group(unvisited: Set[FrozenSet[Token]], candidate: Dict[FrozenSet[Token], Tuple[int, str]]):
+def _optimize_group(
+    unvisited: Set[FrozenSet[Token]], candidate: Dict[FrozenSet[Token], Tuple[int, str]]
+):
     """Divide candidates into groups that each group is internally connected
     with common members. Then for each group, find the best non-overlapping
     members to reach the maximum length reduction.
@@ -486,12 +514,16 @@ def _optimize_group(unvisited: Set[FrozenSet[Token]], candidate: Dict[FrozenSet[
                     stack.append(nextKey)
                 AddImplication(nextVar, currentVarNot)
 
-        model.Maximize(LinearExpr.ScalProd(pool.values(), tuple(candidate[k][0] for k in pool)))
+        model.Maximize(
+            LinearExpr.ScalProd(pool.values(), tuple(candidate[k][0] for k in pool))
+        )
 
         solver = CpSolver()
         status = solver.Solve(model)
         if status != OPTIMAL and status != FEASIBLE:
-            raise RuntimeError(f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
+            raise RuntimeError(
+                f"CP-SAT Solver failed, status: {solver.StatusName(status)}"
+            )
 
         yield from compress(pool, map(solver.BooleanValue, pool.values()))
         pool.clear()
@@ -563,11 +595,15 @@ class Regen:
             regex = self.to_regex()
 
         if self._tokens != Regen(regex)._tokens:
-            raise ValueError("Extraction from computed regex is different from that of original wordlist.")
+            raise ValueError(
+                "Extraction from computed regex is different from that of original wordlist."
+            )
 
         for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
             if _not_special(i):
-                raise ValueError(f"Computed regex does not fully match this word: '{i}'")
+                raise ValueError(
+                    f"Computed regex does not fully match this word: '{i}'"
+                )
 
 
 def parse_arguments():
