@@ -453,6 +453,8 @@ def _optimize_group(unvisited: Set[FrozenSet[Token]], candidate: Dict[FrozenSet[
 
     stack = []
     pool = {}
+    pool_get = pool.get
+
     while unvisited:
 
         currentKey = unvisited.pop()
@@ -475,9 +477,8 @@ def _optimize_group(unvisited: Set[FrozenSet[Token]], candidate: Dict[FrozenSet[
                 currentKey = currentKey.difference(((),))
 
             for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
-                try:
-                    nextVar = pool[nextKey]
-                except KeyError:
+                nextVar = pool_get(nextKey)
+                if nextVar is None:
                     nextVar = pool[nextKey] = model.NewBoolVar(f"{index}")
                     index += 1
                     stack.append(nextKey)
