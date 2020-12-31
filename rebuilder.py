@@ -240,8 +240,7 @@ class MTeamScraper:
         downloader = _get_downloader(xpath)
 
         print(f"Scanning mteam ({self._limit} pages)...", end="", flush=True)
-        if not self._logined:
-            self._login()
+        self._login()
 
         with ThreadPoolExecutor(max_workers=None) as ex:
 
@@ -275,6 +274,9 @@ class MTeamScraper:
                 yield from filter(None, map(methodcaller("result"), as_completed(pool)))
 
     def _login(self):
+        if self._logined:
+            return
+
         res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
         res.raise_for_status()
         if "/login.php" in res.url:
@@ -292,7 +294,7 @@ class MTeamScraper:
         print("Downloading:", link)
         try:
             content = _request(link).content
-        except (RequestException, AttributeError):
+        except RequestException:
             print(f"Downloading failed: {link}")
             return
 
@@ -638,8 +640,7 @@ def _get_downloader(func: Callable[[HtmlElement], List[str]], raise_404: bool = 
             if raise_404 and response.status_code == 404:
                 raise LastPageReached
             raise
-        else:
-            return func(fromstring(response.content))
+        return func(fromstring(response.content))
 
     return downloader
 
@@ -741,8 +742,6 @@ def parse_arguments():
 
 def _init_session(session_file: Path):
 
-    global session
-
     try:
         with open(session_file, "rb") as f:
             session = pickle.load(f)
@@ -750,7 +749,7 @@ def _init_session(session_file: Path):
         pass
     else:
         if isinstance(session, Session):
-            return
+            return session
 
     session = Session()
     session.cookies.set_cookie(
@@ -764,16 +763,22 @@ def _init_session(session_file: Path):
     adapter = HTTPAdapter(max_retries=5)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
+    return session
 
 
-def _save_session(session_file: Path):
+def _save_session(session: Session, session_file: Path):
 
     session_file.parent.mkdir(parents=True, exist_ok=True)
     with open(session_file, "wb") as f:
         pickle.dump(session, f)
 
 
+session = None
+
+
 def main():
+
+    global session
 
     os.chdir(Path(__file__).parent)
 
@@ -781,7 +786,7 @@ def main():
     args = parse_arguments()
 
     session_file = Path("raw/cookies")
-    _init_session(session_file)
+    session = _init_session(session_file)
 
     mteam = MTeamScraper(
         av_page=config["mteam_av_page"],
@@ -818,7 +823,7 @@ def main():
         else:
             analyzer.analyze_non_av()
 
-    _save_session(session_file)
+    _save_session(session, session_file)
 
 
 if __name__ == "__main__":
