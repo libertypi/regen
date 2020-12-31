@@ -274,9 +274,9 @@ class MTeamScraper:
                 yield from filter(None, map(methodcaller("result"), as_completed(pool)))
 
     def _login(self):
+
         if self._logined:
             return
-
         res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
         res.raise_for_status()
         if "/login.php" in res.url:
