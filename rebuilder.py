@@ -7,10 +7,13 @@ import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
+                                as_completed)
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, tee
 from operator import itemgetter, methodcaller
+from os.path import exists, normpath
+from os.path import join as pathjoin
 from pathlib import Path
 from reprlib import repr as _repr
 from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
@@ -37,10 +40,10 @@ class LastPageReached(Exception):
 class Scraper:
     @classmethod
     def get_id(cls) -> Iterator[Tuple[str, str]]:
-        matcher = re.compile(r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
-        return map(
-            itemgetter(1, 2), filter(None, map(matcher, map(str.lower, cls._scrape())))
-        )
+        matcher = re.compile(
+            r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
+        return map(itemgetter(1, 2),
+                   filter(None, map(matcher, map(str.lower, cls._scrape()))))
 
     @staticmethod
     def _scrape() -> Iterator[str]:
@@ -62,8 +65,7 @@ class JavBusScraper(Scraper):
         downloader = _get_downloader(
             XPath(
                 './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()',
-                smart_strings=False,
-            ),
+                smart_strings=False),
             raise_404=True,
         )
         step = 500
@@ -78,11 +80,8 @@ class JavBusScraper(Scraper):
                     print(f"{lo}:{hi}..", end="", flush=True)
                     try:
                         yield from chain.from_iterable(
-                            ex.map(
-                                downloader,
-                                (f"{base}/{path}/{page}" for page in range(lo, hi)),
-                            )
-                        )
+                            ex.map(downloader, (f"{base}/{path}/{page}"
+                                                for page in range(lo, hi))))
                     except LastPageReached:
                         break
                     lo = hi
@@ -106,9 +105,9 @@ class JavBusScraper(Scraper):
 
 class JavDBScraper(Scraper):
     @staticmethod
-    def _scrape(
-        paths=("uncensored", ""), limit: int = 81, xpath: Callable = None
-    ) -> Iterator[str]:
+    def _scrape(paths=("uncensored", ""),
+                limit: int = 81,
+                xpath: Callable = None) -> Iterator[str]:
 
         print(f"Scanning javdb...")
 
@@ -122,9 +121,8 @@ class JavDBScraper(Scraper):
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
                 ex.submit(downloader, f"https://javdb.com/{path}?page={page}")
-                for page in range(1, limit)
-                for path in paths
-            )
+                for page in range(1, limit) for path in paths)
+
             yield from chain.from_iterable(map(methodcaller("result"), fts))
 
     @classmethod
@@ -142,7 +140,10 @@ class JavDBScraper(Scraper):
         matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
         freq_words = get_freq_words()
 
-        for title in cls._scrape(paths=("series/western",), limit=5, xpath=xpath):
+        for title in cls._scrape(paths=("series/western", ),
+                                 limit=5,
+                                 xpath=xpath):
+
             title = title.replace(" ", "").lower()
             if title not in freq_words and matcher(title):
                 yield title
@@ -162,17 +163,19 @@ class MTeamScraper:
 
     DOMAIN = "https://pt.m-team.cc/"
 
-    def __init__(
-        self,
-        av_page: str,
-        non_av_page: str,
-        cache_dir: str,
-        account: Tuple[str, str],
-        limit: int = 500,
-    ) -> None:
+    def __init__(self,
+                 av_page: str,
+                 non_av_page: str,
+                 cache_dir: str,
+                 account: Tuple[str, str],
+                 limit: int = 500) -> None:
 
         self._pages = (non_av_page, av_page)
-        self._cache_dir = Path(cache_dir)
+        cache_dir = normpath(cache_dir)
+        self._cache_dirs = (
+            pathjoin(cache_dir, "non_av"),
+            pathjoin(cache_dir, "av"),
+        )
         self._account = account
         self._limit = limit
         self._logined = False
@@ -198,26 +201,34 @@ class MTeamScraper:
                     if m[1] not in freq_words:
                         yield m.group(1, 3)
 
-    def get_path(
-        self, is_av: bool, fetch: bool = True, cjk_title_only: bool = False
-    ) -> Iterator[Path]:
+    def get_path(self,
+                 is_av: bool,
+                 fetch: bool = True,
+                 cjk_title_only: bool = False) -> Iterator[str]:
 
-        subdir = self._cache_dir.joinpath("av" if is_av else "non_av")
-        subdir.mkdir(parents=True, exist_ok=True)
+        cache_dir = self._cache_dirs[is_av]
+        os.makedirs(cache_dir, exist_ok=True)
 
-        if not fetch:
-            matcher = re.compile(r"[0-9]+\.txt").fullmatch
-            for path in subdir.iterdir():
-                if matcher(path.name):
-                    yield path
-            return
+        if fetch:
+            return self._from_web(
+                cache_dir,
+                urljoin(self.DOMAIN, self._pages[is_av]),
+                cjk_title_only,
+            )
 
-        pool = []
-        idx = 0
-        joinpath = subdir.joinpath
-        matcher = re.compile(r"id=([0-9]+)").search
-        url = urljoin(self.DOMAIN, self._pages[is_av])
-        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
+        return self._from_cache(cache_dir)
+
+    @staticmethod
+    def _from_cache(cache_dir: str) -> Iterator[str]:
+
+        matcher = re.compile(r"[0-9]+\.txt").fullmatch
+        with os.scandir(cache_dir) as it:
+            for entry in it:
+                if matcher(entry.name):
+                    yield entry.path
+
+    def _from_web(self, cache_dir: str, baseurl: str,
+                  cjk_title_only: bool) -> Iterator[str]:
 
         if cjk_title_only:
             xpath = XPath(
@@ -239,15 +250,19 @@ class MTeamScraper:
             )
         downloader = _get_downloader(xpath)
 
+        pool = []
+        idx = 0
+        matcher = re.compile(r"id=([0-9]+)").search
+        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
+
         print(f"Scanning mteam ({self._limit} pages)...", end="", flush=True)
         self._login()
 
         with ThreadPoolExecutor(max_workers=None) as ex:
 
             for ft in as_completed(
-                ex.submit(downloader, url, params={"page": i})
-                for i in range(1, self._limit + 1)
-            ):
+                    ex.submit(downloader, baseurl, params={"page": i})
+                    for i in range(1, self._limit + 1)):
 
                 idx += 1
                 if not idx % step:
@@ -258,38 +273,41 @@ class MTeamScraper:
 
                 for link in ft.result():
                     try:
-                        path = joinpath(matcher(link)[1] + ".txt")
+                        path = pathjoin(cache_dir, matcher(link)[1] + ".txt")
                     except TypeError:
                         continue
-                    if path.exists():
+                    if exists(path):
                         yield path
                     else:
                         pool.append(
-                            ex.submit(
-                                self._dl_torrent, urljoin(self.DOMAIN, link), path
-                            )
-                        )
-
+                            ex.submit(self._dl_torrent,
+                                      urljoin(self.DOMAIN, link), path))
             if pool:
-                yield from filter(None, map(methodcaller("result"), as_completed(pool)))
+                yield from filter(
+                    None, map(methodcaller("result"), as_completed(pool)))
 
     def _login(self):
 
         if self._logined:
             return
+
         res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
         res.raise_for_status()
         if "/login.php" in res.url:
             res = session.post(
                 url=self.DOMAIN + "takelogin.php",
-                data={"username": self._account[0], "password": self._account[1]},
+                data={
+                    "username": self._account[0],
+                    "password": self._account[1]
+                },
                 headers={"referer": self.DOMAIN + "login.php"},
             )
             res.raise_for_status()
+
         self._logined = True
 
     @staticmethod
-    def _dl_torrent(link: str, path: Path) -> Path:
+    def _dl_torrent(link: str, path: str):
 
         print("Downloading:", link)
         try:
@@ -303,17 +321,19 @@ class MTeamScraper:
             with open(path, "w", encoding="utf-8") as f:
                 f.writelines(i[0].lower() + "\n" for i in filelist)
 
-        except (TorrentoolException, OSError, TypeError):
+        except (TorrentoolException, TypeError, OSError):
 
-            torrent_file = path.with_suffix(".torrent")
+            torrent_file = path + ".torrent"
             spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
 
             try:
-                torrent_file.write_bytes(content)
+                with open(torrent_file, "wb") as f:
+                    f.write(content)
+
                 filelist = subprocess.check_output(
-                    ("transmission-show", torrent_file), text=True
-                )
-                filelist = spliter.findall(filelist, filelist.index("\n\nFILES\n\n"))
+                    ("transmission-show", torrent_file), text=True)
+                filelist = spliter.findall(filelist,
+                                           filelist.index("\n\nFILES\n\n"))
                 if not filelist:
                     raise ValueError
 
@@ -322,19 +342,24 @@ class MTeamScraper:
 
             except (subprocess.CalledProcessError, ValueError, OSError):
                 print(f'Parsing torrent error: "{link}"')
-                path.unlink(missing_ok=True)
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
                 return
 
             finally:
-                torrent_file.unlink(missing_ok=True)
+                try:
+                    os.unlink(torrent_file)
+                except OSError:
+                    pass
 
         return path
 
 
 class Builder:
-    def __init__(
-        self, output_file: str, raw_dir: str, mteam: MTeamScraper, fetch: bool
-    ) -> None:
+    def __init__(self, output_file: str, raw_dir: str, mteam: MTeamScraper,
+                 fetch: bool) -> None:
 
         self._output_file = Path(output_file)
         self._raw_dir = Path(raw_dir)
@@ -355,26 +380,30 @@ class Builder:
             return
 
         self.regex = f"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
-        return _update_file(self._output_file, lambda _: (self.regex,))[0]
+        return _update_file(self._output_file, lambda _: (self.regex, ))[0]
 
     def _build_regex(self, name: str, omitOuterParen: bool):
 
         joinpath = self._raw_dir.joinpath
         wordlist = _update_file(
-            joinpath(f"{name}.txt"), getattr(self, f"_{name}_strategy")
+            joinpath(f"{name}.txt"),
+            getattr(self, f"_{name}_strategy"),
         )
         whitelist = _update_file(
-            joinpath(f"{name}_whitelist.txt"), self._normalize_words
+            joinpath(f"{name}_whitelist.txt"),
+            self._normalize_words,
         )
         blacklist = _update_file(
-            joinpath(f"{name}_blacklist.txt"), self._normalize_words
+            joinpath(f"{name}_blacklist.txt"),
+            self._normalize_words,
         )
 
         if name != "keyword" and self.keyword_regex:
-            regex = chain(whitelist, blacklist, (self.keyword_regex,))
+            regex = chain(whitelist, blacklist, (self.keyword_regex, ))
         else:
             regex = chain(whitelist, blacklist)
-        wordlist = set(filterfalse(re.compile("|".join(regex)).fullmatch, wordlist))
+        wordlist = set(
+            filterfalse(re.compile("|".join(regex)).fullmatch, wordlist))
 
         wordlist.update(whitelist)
         wordlist.difference_update(blacklist)
@@ -403,7 +432,8 @@ class Builder:
     def _keyword_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
         if not self._fetch and old_list:
             return self._normalize_words(old_list)
-        return set(chain(JavBusScraper.get_western(), JavDBScraper.get_western()))
+        return set(
+            chain(JavBusScraper.get_western(), JavDBScraper.get_western()))
 
     def _prefix_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
         if not self._fetch and old_list:
@@ -424,9 +454,7 @@ class Builder:
         return set(map(str.lower, filter(None, map(str.strip, wordlist))))
 
 
-def _update_file(
-    file: Path, stragety: Callable[[Iterable[str]], Iterable[str]]
-) -> List[str]:
+def _update_file(file: Path, stragety: Callable) -> List[str]:
 
     try:
         with open(file, "r+", encoding="utf-8") as f:
@@ -449,9 +477,8 @@ def _update_file(
 
 
 class Analyzer:
-    def __init__(
-        self, regex_file: str, report_dir: str, mteam: MTeamScraper, fetch: bool
-    ) -> None:
+    def __init__(self, regex_file: str, report_dir: str, mteam: MTeamScraper,
+                 fetch: bool) -> None:
 
         self._report_dir = Path(report_dir)
         self._report_dir.mkdir(parents=True, exist_ok=True)
@@ -459,17 +486,17 @@ class Analyzer:
         self._mteam = mteam
         self._fetch = fetch
 
-        regex = Path(regex_file).read_text(encoding="utf-8").strip()
-        assert len(regex.splitlines()) == 1, "regex file should contain only one line"
+        with open(regex_file, "r", encoding="utf-8") as f:
+            regex = f.readline().strip()
+            assert (regex and not f.read()
+                    ), "regex file should contain one and only one line"
 
         p = regex.index("(", 1)
-        self._av_matcher = re.compile(
-            f"{regex[:p]}(?P<m>{regex[p+1:]}", flags=re.M
-        ).search
-        self._video_filter = re.compile(
+        self._matcher = re.compile(f"{regex[:p]}(?P<m>{regex[p+1:]}",
+                                   flags=re.M).search
+        self._filter = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
-            flags=re.M,
-        ).search
+            flags=re.M).search
 
     def analyze_av(self):
 
@@ -482,8 +509,7 @@ class Analyzer:
 
         prefix_finder = re.compile(
             r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:[hm]hb[0-9]{,2})?)\b.*$",
-            flags=re.M,
-        ).findall
+            flags=re.M).findall
         word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
 
         flat_counter = defaultdict(list)
@@ -492,12 +518,11 @@ class Analyzer:
         tmp = set()
 
         with ProcessPoolExecutor(max_workers=None) as ex, open(
-            unmatch_raw, "w", encoding="utf-8"
-        ) as f:
+                unmatch_raw, "w", encoding="utf-8") as f:
 
-            for content in ex.map(
-                self._match_av, self._mteam.get_path(True, self._fetch), chunksize=100
-            ):
+            for content in ex.map(self._match_av,
+                                  self._mteam.get_path(True, self._fetch),
+                                  chunksize=100):
 
                 total += 1
                 if content:
@@ -521,17 +546,13 @@ class Analyzer:
 
         freq_words = get_freq_words()
         result = [
-            (i, len(v), k, set(v))
-            for k, v in flat_counter.items()
+            (i, len(v), k, set(v)) for k, v in flat_counter.items()
             if (i := prefix_counter[k]) >= _JAV_THRESH and k not in freq_words
         ]
         result.sort(reverse=True)
 
-        words = [
-            (v, k)
-            for k, v in word_counter.items()
-            if v >= _JAV_THRESH and k not in freq_words
-        ]
+        words = [(v, k) for k, v in word_counter.items()
+                 if v >= _JAV_THRESH and k not in freq_words]
         words.sort(reverse=True)
 
         with open(unmatch_freq, "w", encoding="utf-8") as f:
@@ -561,12 +582,9 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex:
 
-            for video in ex.map(
-                self._match_non_av,
-                self._mteam.get_path(False, self._fetch),
-                chunksize=100,
-            ):
-
+            for video in ex.map(self._match_non_av,
+                                self._mteam.get_path(False, self._fetch),
+                                chunksize=100):
                 total += 1
                 if video:
                     mismatched += 1
@@ -584,9 +602,8 @@ class Analyzer:
         brief = self._get_brief("Mismatch", total, mismatched)
         print(brief)
 
-        result = [
-            (torrent_counter[k], len(v), k, set(v)) for k, v in flat_counter.items()
-        ]
+        result = [(torrent_counter[k], len(v), k, set(v))
+                  for k, v in flat_counter.items()]
         result.sort(reverse=True)
 
         with open(mismatched_file, "w", encoding="utf-8") as f:
@@ -596,19 +613,20 @@ class Analyzer:
 
         print(f"Result saved to: {mismatched_file}")
 
-    def _match_av(self, path: Path) -> Optional[str]:
+    def _match_av(self, path: str) -> Optional[str]:
+
         with open(path, "r", encoding="utf-8") as f:
-            a, b = tee(filter(self._video_filter, f))
-            if not any(map(self._av_matcher, a)):
+            a, b = tee(filter(self._filter, f))
+            if not any(map(self._matcher, a)):
                 return "".join(b)
 
-    def _match_non_av(self, path: Path) -> Tuple[str]:
+    def _match_non_av(self, path: str) -> Tuple[str]:
+
         with open(path, "r", encoding="utf-8") as f:
             return tuple(
-                m["m"]
-                for m in map(self._av_matcher, filter(self._video_filter, f))
-                if m
-            )
+                match["m"]
+                for match in map(self._matcher, filter(self._filter, f))
+                if match)
 
     @staticmethod
     def _get_brief(name: str, total: int, n: int):
@@ -617,8 +635,7 @@ class Analyzer:
     @staticmethod
     def _format_report(result: Iterable):
         yield "{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format(
-            "uniq", "occur", "word", "strings", ""
-        )
+            "uniq", "occur", "word", "strings", "")
         for i, j, k, s in result:
             yield f"{i:6d}  {j:6d}  {k:15}  {_repr(s)[1:-1]}\n"
 
@@ -630,7 +647,8 @@ def _request(url: str, **kwargs):
     return response
 
 
-def _get_downloader(func: Callable[[HtmlElement], List[str]], raise_404: bool = False):
+def _get_downloader(func: Callable[[HtmlElement], List[str]],
+                    raise_404: bool = False):
     def downloader(url: str, **kwargs):
 
         response = session.get(url, timeout=(7, 28), **kwargs)
@@ -657,8 +675,7 @@ def get_freq_words():
             "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
         ).text
         result = islice(
-            re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.M), 3000
-        )
+            re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.M), 3000)
         _freq_words = frozenset(map(str.lower, map(itemgetter(1), result)))
     return _freq_words
 
@@ -675,7 +692,8 @@ def parse_config(configfile: str):
         "cache_dir": "",
         "mteam_username": "",
         "mteam_password": "",
-        "mteam_av_page": "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
+        "mteam_av_page":
+        "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
         "mteam_non_av_page": "torrents.php",
     }
 
@@ -753,13 +771,11 @@ def _init_session(session_file: Path):
 
     session = Session()
     session.cookies.set_cookie(
-        create_cookie(domain="www.javbus.com", name="existmag", value="all")
-    )
-    session.headers.update(
-        {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"
-        }
-    )
+        create_cookie(domain="www.javbus.com", name="existmag", value="all"))
+    session.headers.update({
+        "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"
+    })
     adapter = HTTPAdapter(max_retries=5)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
