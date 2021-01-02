@@ -119,7 +119,7 @@ class JavDBScraper(Scraper):
 
         if not paths:
             paths = ("uncensored", ""),
-            limit = 81,
+            limit = 81
             xpath = XPath(
                 './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
                 smart_strings=False)
