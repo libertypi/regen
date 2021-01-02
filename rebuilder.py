@@ -41,8 +41,10 @@ class Scraper:
 
     @classmethod
     def get_id(cls) -> Iterator[Tuple[str, str]]:
+
         matcher = re.compile(
             r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
+
         return map(itemgetter(1, 2),
                    filter(None, map(matcher, map(str.lower, cls._scrape()))))
 
@@ -57,21 +59,25 @@ class Scraper:
 
 class JavBusScraper(Scraper):
 
-    @staticmethod
-    def _scrape(
-        base="https://www.javbus.com/",
-        paths=("page", "uncensored/page", "genre/hd", "uncensored/genre/hd"),
-    ) -> Iterator[str]:
+    downloader = None
+
+    @classmethod
+    def _scrape(cls, base: str = None, paths: tuple = None) -> Iterator[str]:
 
         print(f"Scanning {base}...")
-        downloader = _get_downloader(
-            XPath(
-                './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()',
-                smart_strings=False),
-            raise_404=True,
-        )
-        step = 500
 
+        if not base:
+            base = "https://www.javbus.com/"
+            paths = ("page", "uncensored/page", "genre/hd",
+                     "uncensored/genre/hd")
+
+        if not cls.downloader:
+            xpath = XPath(
+                './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()',
+                smart_strings=False)
+            cls.downloader = _get_downloader(xpath, raise_404=True)
+
+        step = 500
         with ThreadPoolExecutor(max_workers=None) as ex:
             for path in paths:
                 lo = 1
@@ -82,8 +88,8 @@ class JavBusScraper(Scraper):
                     print(f"{lo}:{hi}..", end="", flush=True)
                     try:
                         yield from chain.from_iterable(
-                            ex.map(downloader, (f"{base}/{path}/{page}"
-                                                for page in range(lo, hi))))
+                            ex.map(cls.downloader, (f"{base}/{path}/{page}"
+                                                    for page in range(lo, hi))))
                     except LastPageReached:
                         break
                     lo = hi
@@ -91,8 +97,8 @@ class JavBusScraper(Scraper):
 
     @classmethod
     def get_keyword(cls):
+
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
-        freq_words = get_freq_words()
 
         result = cls._scrape(
             base="https://www.javbus.org/",
@@ -100,9 +106,7 @@ class JavBusScraper(Scraper):
         )
         result = Counter(m[1].lower() for m in map(matcher, result) if m)
 
-        for k, v in result.items():
-            if v > _KEYWORD_THRESH and k not in freq_words:
-                yield k
+        return (k for k, v in result.items() if v > _KEYWORD_THRESH)
 
 
 class JavDBScraper(Scraper):
@@ -141,16 +145,16 @@ class JavDBScraper(Scraper):
             namespaces={"re": "http://exslt.org/regular-expressions"},
             smart_strings=False,
         )
-        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
-        freq_words = get_freq_words()
+        matcher = re.compile(r"[A-Za-z0-9]{3,}").fullmatch
 
         for title in cls._scrape(paths=("series/western",),
                                  limit=5,
                                  xpath=xpath):
 
-            title = title.replace(" ", "").lower()
-            if title not in freq_words and matcher(title):
-                yield title
+            title = title.replace(" ", "")
+
+            if matcher(title):
+                yield title.lower()
 
 
 class GithubScraper(Scraper):
@@ -432,13 +436,19 @@ class Builder:
         print(f"{name} regex test passed, {-diff} characters saved.")
         return computed
 
-    def _keyword_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
+    def _keyword_strategy(self, old_list: Iterable[str]) -> Set[str]:
+
         if not self._fetch and old_list:
             return self._normalize_words(old_list)
-        return set(
+
+        result = set(
             chain(JavBusScraper.get_keyword(), JavDBScraper.get_keyword()))
+        result.difference_update(get_freq_words())
+
+        return result
 
     def _prefix_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
+
         if not self._fetch and old_list:
             return self._normalize_words(old_list)
 
