@@ -20,7 +20,7 @@ from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
 from urllib.parse import urljoin
 
 from lxml.etree import XPath
-from lxml.html import HtmlElement, fromstring
+from lxml.html import fromstring
 from requests import HTTPError, RequestException, Session
 from requests.adapters import HTTPAdapter
 from requests.cookies import create_cookie
@@ -29,8 +29,8 @@ from torrentool.exceptions import TorrentoolException
 
 from regen import Regen
 
-_JAV_THRESH = 5
-_WES_THRESH = 10
+_PREFIX_THRESH = 5
+_KEYWORD_THRESH = 10
 
 
 class LastPageReached(Exception):
@@ -38,6 +38,7 @@ class LastPageReached(Exception):
 
 
 class Scraper:
+
     @classmethod
     def get_id(cls) -> Iterator[Tuple[str, str]]:
         matcher = re.compile(
@@ -55,6 +56,7 @@ class Scraper:
 
 
 class JavBusScraper(Scraper):
+
     @staticmethod
     def _scrape(
         base="https://www.javbus.com/",
@@ -88,7 +90,7 @@ class JavBusScraper(Scraper):
                 print()
 
     @classmethod
-    def get_western(cls):
+    def get_keyword(cls):
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         freq_words = get_freq_words()
 
@@ -99,19 +101,22 @@ class JavBusScraper(Scraper):
         result = Counter(m[1].lower() for m in map(matcher, result) if m)
 
         for k, v in result.items():
-            if v > _WES_THRESH and k not in freq_words:
+            if v > _KEYWORD_THRESH and k not in freq_words:
                 yield k
 
 
 class JavDBScraper(Scraper):
+
     @staticmethod
-    def _scrape(paths=("uncensored", ""),
-                limit: int = 81,
+    def _scrape(paths: Tuple[str] = None,
+                limit: int = None,
                 xpath: Callable = None) -> Iterator[str]:
 
         print(f"Scanning javdb...")
 
-        if not xpath:
+        if not paths:
+            paths = ("uncensored", ""),
+            limit = 81,
             xpath = XPath(
                 './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
                 smart_strings=False,
@@ -121,26 +126,25 @@ class JavDBScraper(Scraper):
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
                 ex.submit(downloader, f"https://javdb.com/{path}?page={page}")
-                for page in range(1, limit) for path in paths)
+                for page in range(1, limit)
+                for path in paths)
 
             yield from chain.from_iterable(map(methodcaller("result"), fts))
 
     @classmethod
-    def get_western(cls):
+    def get_keyword(cls):
 
         xpath = XPath(
-            f"""
-            //div[@id="series"]//div[@class="box"]
-            /a[@title and re:match(span/text(), "[0-9]+") > {_WES_THRESH}]
-            /strong/text()
-            """,
+            '//div[@id="series"]//div[@class="box"]'
+            f'/a[@title and re:match(span/text(), "[0-9]+") > {_KEYWORD_THRESH}]'
+            '/strong/text()',
             namespaces={"re": "http://exslt.org/regular-expressions"},
             smart_strings=False,
         )
         matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
         freq_words = get_freq_words()
 
-        for title in cls._scrape(paths=("series/western", ),
+        for title in cls._scrape(paths=("series/western",),
                                  limit=5,
                                  xpath=xpath):
 
@@ -150,6 +154,7 @@ class JavDBScraper(Scraper):
 
 
 class GithubScraper(Scraper):
+
     @staticmethod
     def _scrape() -> List[str]:
 
@@ -210,11 +215,7 @@ class MTeamScraper:
         os.makedirs(cache_dir, exist_ok=True)
 
         if fetch:
-            return self._from_web(
-                cache_dir,
-                urljoin(self.DOMAIN, self._pages[is_av]),
-                cjk_title_only,
-            )
+            return self._from_web(cache_dir, self._pages[is_av], cjk_title_only)
 
         return self._from_cache(cache_dir)
 
@@ -252,6 +253,7 @@ class MTeamScraper:
 
         pool = []
         idx = 0
+        baseurl = urljoin(self.DOMAIN, baseurl)
         matcher = re.compile(r"id=([0-9]+)").search
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
 
@@ -358,6 +360,7 @@ class MTeamScraper:
 
 
 class Builder:
+
     def __init__(self, output_file: str, raw_dir: str, mteam: MTeamScraper,
                  fetch: bool) -> None:
 
@@ -380,7 +383,7 @@ class Builder:
             return
 
         self.regex = f"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
-        return _update_file(self._output_file, lambda _: (self.regex, ))[0]
+        return _update_file(self._output_file, lambda _: (self.regex,))[0]
 
     def _build_regex(self, name: str, omitOuterParen: bool):
 
@@ -399,7 +402,7 @@ class Builder:
         )
 
         if name != "keyword" and self.keyword_regex:
-            regex = chain(whitelist, blacklist, (self.keyword_regex, ))
+            regex = chain(whitelist, blacklist, (self.keyword_regex,))
         else:
             regex = chain(whitelist, blacklist)
         wordlist = set(
@@ -433,7 +436,7 @@ class Builder:
         if not self._fetch and old_list:
             return self._normalize_words(old_list)
         return set(
-            chain(JavBusScraper.get_western(), JavDBScraper.get_western()))
+            chain(JavBusScraper.get_keyword(), JavDBScraper.get_keyword()))
 
     def _prefix_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
         if not self._fetch and old_list:
@@ -447,7 +450,7 @@ class Builder:
         result = Counter(map(itemgetter(0), result))
         print(f"Uniq ID: {c}. Uniq prefix: {len(result)}.")
 
-        return (k for k, v in result.items() if v >= _JAV_THRESH)
+        return (k for k, v in result.items() if v >= _PREFIX_THRESH)
 
     @staticmethod
     def _normalize_words(wordlist: Iterable[str]) -> Set[str]:
@@ -477,6 +480,7 @@ def _update_file(file: Path, stragety: Callable) -> List[str]:
 
 
 class Analyzer:
+
     def __init__(self, regex_file: str, report_dir: str, mteam: MTeamScraper,
                  fetch: bool) -> None:
 
@@ -488,8 +492,9 @@ class Analyzer:
 
         with open(regex_file, "r", encoding="utf-8") as f:
             regex = f.readline().strip()
-            assert (regex and not f.read()
-                    ), "regex file should contain one and only one line"
+            assert (
+                regex and
+                not f.read()), "regex file should contain one and only one line"
 
         p = regex.index("(", 1)
         self._matcher = re.compile(f"{regex[:p]}(?P<m>{regex[p+1:]}",
@@ -545,14 +550,15 @@ class Analyzer:
         print(brief)
 
         freq_words = get_freq_words()
-        result = [
-            (i, len(v), k, set(v)) for k, v in flat_counter.items()
-            if (i := prefix_counter[k]) >= _JAV_THRESH and k not in freq_words
-        ]
+        result = [(i, len(v), k, set(v))
+                  for k, v in flat_counter.items()
+                  if (i := prefix_counter[k]) >= _PREFIX_THRESH and
+                  k not in freq_words]
         result.sort(reverse=True)
 
-        words = [(v, k) for k, v in word_counter.items()
-                 if v >= _JAV_THRESH and k not in freq_words]
+        words = [(v, k)
+                 for k, v in word_counter.items()
+                 if v >= _PREFIX_THRESH and k not in freq_words]
         words.sort(reverse=True)
 
         with open(unmatch_freq, "w", encoding="utf-8") as f:
@@ -647,8 +653,8 @@ def _request(url: str, **kwargs):
     return response
 
 
-def _get_downloader(func: Callable[[HtmlElement], List[str]],
-                    raise_404: bool = False):
+def _get_downloader(xpath: XPath, raise_404: bool = False):
+
     def downloader(url: str, **kwargs):
 
         response = session.get(url, timeout=(7, 28), **kwargs)
@@ -658,7 +664,7 @@ def _get_downloader(func: Callable[[HtmlElement], List[str]],
             if raise_404 and response.status_code == 404:
                 raise LastPageReached
             raise
-        return func(fromstring(response.content))
+        return xpath(fromstring(response.content))
 
     return downloader
 
@@ -688,13 +694,18 @@ def parse_config(configfile: str):
         return parser["DEFAULT"]
 
     parser["DEFAULT"] = {
-        "output_file": "",
-        "cache_dir": "",
-        "mteam_username": "",
-        "mteam_password": "",
+        "output_file":
+            "",
+        "cache_dir":
+            "",
+        "mteam_username":
+            "",
+        "mteam_password":
+            "",
         "mteam_av_page":
-        "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
-        "mteam_non_av_page": "torrents.php",
+            "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
+        "mteam_non_av_page":
+            "torrents.php",
     }
 
     with open(configfile, "w", encoding="utf-8") as f:
@@ -774,7 +785,7 @@ def _init_session(session_file: Path):
         create_cookie(domain="www.javbus.com", name="existmag", value="all"))
     session.headers.update({
         "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"
     })
     adapter = HTTPAdapter(max_retries=5)
     session.mount("http://", adapter)
