@@ -59,7 +59,7 @@ class Scraper:
 
 class JavBusScraper(Scraper):
 
-    downloader = None
+    download = None
 
     @classmethod
     def _scrape(cls, base: str = None, paths: tuple = None) -> Iterator[str]:
@@ -71,11 +71,11 @@ class JavBusScraper(Scraper):
             paths = ("page", "uncensored/page", "genre/hd",
                      "uncensored/genre/hd")
 
-        if not cls.downloader:
+        if not cls.download:
             xpath = XPath(
                 './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()',
                 smart_strings=False)
-            cls.downloader = _get_downloader(xpath, raise_404=True)
+            cls.download = _get_downloader(xpath, raise_404=True)
 
         step = 500
         with ThreadPoolExecutor(max_workers=None) as ex:
@@ -88,8 +88,8 @@ class JavBusScraper(Scraper):
                     print(f"{lo}:{hi}..", end="", flush=True)
                     try:
                         yield from chain.from_iterable(
-                            ex.map(cls.downloader, (f"{base}/{path}/{page}"
-                                                    for page in range(lo, hi))))
+                            ex.map(cls.download, (f"{base}/{path}/{page}"
+                                                  for page in range(lo, hi))))
                     except LastPageReached:
                         break
                     lo = hi
@@ -99,7 +99,6 @@ class JavBusScraper(Scraper):
     def get_keyword(cls):
 
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
-
         result = cls._scrape(
             base="https://www.javbus.org/",
             paths=("page", *(f"studio/{i}" for i in range(1, 5))),
@@ -123,8 +122,7 @@ class JavDBScraper(Scraper):
             limit = 81,
             xpath = XPath(
                 './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
-                smart_strings=False,
-            )
+                smart_strings=False)
         downloader = _get_downloader(xpath)
 
         with ThreadPoolExecutor(max_workers=3) as ex:
@@ -132,7 +130,6 @@ class JavDBScraper(Scraper):
                 ex.submit(downloader, f"https://javdb.com/{path}?page={page}")
                 for page in range(1, limit)
                 for path in paths)
-
             yield from chain.from_iterable(map(methodcaller("result"), fts))
 
     @classmethod
@@ -152,7 +149,6 @@ class JavDBScraper(Scraper):
                                  xpath=xpath):
 
             title = title.replace(" ", "")
-
             if matcher(title):
                 yield title.lower()
 
