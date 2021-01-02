@@ -12,7 +12,7 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, tee
 from operator import itemgetter, methodcaller
-from os.path import exists, normpath
+from os.path import exists, expanduser, normpath
 from os.path import join as pathjoin
 from pathlib import Path
 from reprlib import repr as _repr
@@ -20,7 +20,7 @@ from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
 from urllib.parse import urljoin
 
 from lxml.etree import XPath
-from lxml.html import fromstring
+from lxml.html import fromstring as html_fromstring
 from requests import HTTPError, RequestException, Session
 from requests.adapters import HTTPAdapter
 from requests.cookies import create_cookie
@@ -53,7 +53,7 @@ class Scraper:
         raise NotImplemented
 
     @staticmethod
-    def get_western() -> Iterator[str]:
+    def get_keyword() -> Iterator[str]:
         raise NotImplemented
 
 
@@ -103,9 +103,11 @@ class JavBusScraper(Scraper):
             base="https://www.javbus.org/",
             paths=("page", *(f"studio/{i}" for i in range(1, 5))),
         )
-        result = Counter(m[1].lower() for m in map(matcher, result) if m)
 
-        return (k for k, v in result.items() if v > _KEYWORD_THRESH)
+        result = Counter(m[1].lower() for m in map(matcher, result) if m)
+        for k, v in result.items():
+            if v > _KEYWORD_THRESH:
+                yield k
 
 
 class JavDBScraper(Scraper):
@@ -118,16 +120,16 @@ class JavDBScraper(Scraper):
         print(f"Scanning javdb...")
 
         if not paths:
-            paths = ("uncensored", ""),
+            paths = ("uncensored", "")
             limit = 81
             xpath = XPath(
                 './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
                 smart_strings=False)
-        downloader = _get_downloader(xpath)
+        download = _get_downloader(xpath)
 
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
-                ex.submit(downloader, f"https://javdb.com/{path}?page={page}")
+                ex.submit(download, f"https://javdb.com/{path}?page={page}")
                 for page in range(1, limit)
                 for path in paths)
             yield from chain.from_iterable(map(methodcaller("result"), fts))
@@ -147,7 +149,6 @@ class JavDBScraper(Scraper):
         for title in cls._scrape(paths=("series/western",),
                                  limit=5,
                                  xpath=xpath):
-
             title = title.replace(" ", "")
             if matcher(title):
                 yield title.lower()
@@ -168,21 +169,17 @@ class MTeamScraper:
 
     DOMAIN = "https://pt.m-team.cc/"
 
-    def __init__(self,
-                 av_page: str,
-                 non_av_page: str,
-                 cache_dir: str,
-                 account: Tuple[str, str],
-                 limit: int = 500) -> None:
+    def __init__(self, limit: int, av_page: str, non_av_page: str,
+                 username: str, password: str, cache_dir: str) -> None:
 
-        self._pages = (non_av_page, av_page)
         cache_dir = normpath(cache_dir)
         self._cache_dirs = (
             pathjoin(cache_dir, "non_av"),
             pathjoin(cache_dir, "av"),
         )
-        self._account = account
         self._limit = limit
+        self._pages = (non_av_page, av_page)
+        self._account = {"username": username, "password": password}
         self._logined = False
 
     def get_id(self) -> Iterator[Tuple[str, str]]:
@@ -249,7 +246,7 @@ class MTeamScraper:
                 '/descendant::a[contains(@href, "download.php?")][1]/@href',
                 smart_strings=False,
             )
-        downloader = _get_downloader(xpath)
+        download = _get_downloader(xpath)
 
         pool = []
         idx = 0
@@ -263,7 +260,7 @@ class MTeamScraper:
         with ThreadPoolExecutor(max_workers=None) as ex:
 
             for ft in as_completed(
-                    ex.submit(downloader, baseurl, params={"page": i})
+                    ex.submit(download, baseurl, params={"page": i})
                     for i in range(1, self._limit + 1)):
 
                 idx += 1
@@ -292,20 +289,20 @@ class MTeamScraper:
 
         if self._logined:
             return
-
-        res = session.head(self.DOMAIN + "torrents.php", allow_redirects=True)
-        res.raise_for_status()
-        if "/login.php" in res.url:
-            res = session.post(
-                url=self.DOMAIN + "takelogin.php",
-                data={
-                    "username": self._account[0],
-                    "password": self._account[1]
-                },
-                headers={"referer": self.DOMAIN + "login.php"},
-            )
+        try:
+            res = session.head(urljoin(self.DOMAIN, self._pages[0]),
+                               allow_redirects=True)
             res.raise_for_status()
-
+            if "/login.php" in res.url:
+                res = session.post(
+                    url=self.DOMAIN + "takelogin.php",
+                    data=self._account,
+                    headers={"referer": self.DOMAIN + "login.php"},
+                )
+                res.raise_for_status()
+        except RequestException as e:
+            print(f'login failed: {e}', file=sys.stderr)
+            sys.exit()
         self._logined = True
 
     @staticmethod
@@ -315,7 +312,7 @@ class MTeamScraper:
         try:
             content = _request(link).content
         except RequestException:
-            print(f"Downloading failed: {link}")
+            print(f"Downloading failed: {link}", file=sys.stderr)
             return
 
         try:
@@ -343,7 +340,7 @@ class MTeamScraper:
                     f.writelines(i.lower() + "\n" for i in filelist)
 
             except (subprocess.CalledProcessError, ValueError, OSError):
-                print(f'Parsing torrent error: "{link}"')
+                print(f'Parsing torrent error: "{link}"', file=sys.stderr)
                 try:
                     os.unlink(path)
                 except OSError:
@@ -361,8 +358,11 @@ class MTeamScraper:
 
 class Builder:
 
-    def __init__(self, output_file: str, raw_dir: str, mteam: MTeamScraper,
-                 fetch: bool) -> None:
+    def __init__(self,
+                 output_file: str,
+                 mteam: MTeamScraper,
+                 fetch: bool,
+                 raw_dir: str = "raw") -> None:
 
         self._output_file = Path(output_file)
         self._raw_dir = Path(raw_dir)
@@ -439,8 +439,8 @@ class Builder:
 
         result = set(
             chain(JavBusScraper.get_keyword(), JavDBScraper.get_keyword()))
-        result.difference_update(get_freq_words())
 
+        result.difference_update(get_freq_words())
         return result
 
     def _prefix_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
@@ -487,23 +487,34 @@ def _update_file(file: Path, stragety: Callable) -> List[str]:
 
 class Analyzer:
 
-    def __init__(self, regex_file: str, report_dir: str, mteam: MTeamScraper,
-                 fetch: bool) -> None:
-
-        self._report_dir = Path(report_dir)
-        self._report_dir.mkdir(parents=True, exist_ok=True)
+    def __init__(self,
+                 regex_file: str,
+                 mteam: MTeamScraper,
+                 fetch: bool,
+                 report_dir: str = "report") -> None:
 
         self._mteam = mteam
         self._fetch = fetch
+        self._report_dir = Path(report_dir)
+        self._report_dir.mkdir(parents=True, exist_ok=True)
 
-        with open(regex_file, "r", encoding="utf-8") as f:
-            regex = f.readline().strip()
-            assert (
-                regex and
-                not f.read()), "regex file should contain one and only one line"
+        try:
+            with open(regex_file, "r", encoding="utf-8") as f:
+                regex = f.readline().strip()
+                i = regex.index("(", 1)
+                if f.read():
+                    raise ValueError
 
-        p = regex.index("(", 1)
-        self._matcher = re.compile(f"{regex[:p]}(?P<m>{regex[p+1:]}",
+        except FileNotFoundError:
+            print(f'{regex_file} not found.', file=sys.stderr)
+            sys.exit()
+
+        except ValueError:
+            print("regex file should contain one and only one line",
+                  file=sys.stderr)
+            sys.exit()
+
+        self._matcher = re.compile(f"{regex[:i]}(?P<m>{regex[i+1:]}",
                                    flags=re.M).search
         self._filter = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
@@ -534,7 +545,6 @@ class Analyzer:
             for content in ex.map(self._match_av,
                                   self._mteam.get_path(True, self._fetch),
                                   chunksize=100):
-
                 total += 1
                 if content:
                     unmatched += 1
@@ -670,7 +680,7 @@ def _get_downloader(xpath: XPath, raise_404: bool = False):
             if raise_404 and response.status_code == 404:
                 raise LastPageReached
             raise
-        return xpath(fromstring(response.content))
+        return xpath(html_fromstring(response.content))
 
     return downloader
 
@@ -695,24 +705,26 @@ def get_freq_words():
 def parse_config(configfile: str):
 
     parser = ConfigParser()
-
-    if parser.read(configfile):
-        return parser["DEFAULT"]
-
     parser["DEFAULT"] = {
         "output_file":
-            "",
+            "regex.txt",
         "cache_dir":
-            "",
+            "cache",
         "mteam_username":
             "",
         "mteam_password":
             "",
         "mteam_av_page":
-            "adult.php?cat410=1&cat429=1&cat426=1&cat437=1&cat431=1&cat432=1",
+            "adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
         "mteam_non_av_page":
             "torrents.php",
     }
+
+    if parser.read(configfile):
+        config = parser["DEFAULT"]
+        config["output_file"] = expanduser(config["output_file"])
+        config["cache_dir"] = expanduser(config["cache_dir"])
+        return config
 
     with open(configfile, "w", encoding="utf-8") as f:
         parser.write(f)
@@ -722,7 +734,7 @@ def parse_config(configfile: str):
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="build and test regex.")
+    parser = argparse.ArgumentParser(description="The ultimate Regex builder.")
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -731,7 +743,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="build",
-        help="build and save regex to file (default)",
+        help="build regex and save to file (default)",
     )
     group.add_argument(
         "-t",
@@ -801,9 +813,16 @@ def _init_session(session_file: Path):
 
 def _save_session(session: Session, session_file: Path):
 
-    session_file.parent.mkdir(parents=True, exist_ok=True)
-    with open(session_file, "wb") as f:
-        pickle.dump(session, f)
+    try:
+        with open(session_file, "wb") as f:
+            pickle.dump(session, f)
+    except FileNotFoundError:
+        try:
+            session_file.parent.mkdir(parents=True)
+        except OSError:
+            pass
+        else:
+            _save_session(session, session_file)
 
 
 session = None
@@ -822,17 +841,17 @@ def main():
     session = _init_session(session_file)
 
     mteam = MTeamScraper(
+        limit=args.limit,
         av_page=config["mteam_av_page"],
         non_av_page=config["mteam_non_av_page"],
-        cache_dir=config["cache_dir"] or "cache",
-        account=(config["mteam_username"], config["mteam_password"]),
-        limit=args.limit,
+        username=config["mteam_username"],
+        password=config["mteam_password"],
+        cache_dir=config["cache_dir"],
     )
 
     if args.mode == "build":
         regex = Builder(
-            output_file=config["output_file"] or "regex.txt",
-            raw_dir="raw",
+            output_file=config["output_file"],
             mteam=mteam,
             fetch=args.fetch,
         ).build()
@@ -841,12 +860,11 @@ def main():
             print(f"\nResult ({len(regex)} chars):")
             print(regex)
         else:
-            print("Generating regex failed.")
+            print("Generating regex failed.", file=sys.stderr)
 
     else:
         analyzer = Analyzer(
             regex_file=config["output_file"],
-            report_dir="report",
             mteam=mteam,
             fetch=args.fetch,
         )
