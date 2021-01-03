@@ -141,14 +141,15 @@ class JavDBScraper(Scraper):
             namespaces={"re": "http://exslt.org/regular-expressions"},
             smart_strings=False,
         )
-        matcher = re.compile(r"[A-Za-z0-9]{3,}").fullmatch
+        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
 
         for title in cls._scrape(paths=("series/western",),
                                  limit=5,
                                  xpath=xpath):
-            title = title.replace(" ", "")
+
+            title = title.replace(" ", "").lower()
             if matcher(title):
-                yield title.lower()
+                yield title
 
 
 class GithubScraper(Scraper):
