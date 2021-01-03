@@ -279,6 +279,7 @@ class MTeamScraper:
                         yield path
                     else:
                         pool.append(ex.submit(self._dl_torrent, link, path))
+
             if pool:
                 yield from filter(
                     None, map(methodcaller("result"), as_completed(pool)))
@@ -838,7 +839,7 @@ def main():
 
     global session
 
-    os.chdir(Path(__file__).parent)
+    os.chdir(op.dirname(__file__))
 
     config = parse_config("builder.ini")
     args = parse_arguments()
