@@ -249,7 +249,7 @@ class MTeamScraper:
         pool = []
         idx = 0
         baseurl = urljoin(self.DOMAIN, baseurl)
-        matcher = re.compile(r"id=([0-9]+)").search
+        matcher = re.compile(r"\bid=([0-9]+)").search
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
         join = op.join
         exists = op.exists
