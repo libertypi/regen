@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import os.path as op
 import pickle
 import re
 import subprocess
@@ -12,8 +13,6 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, tee
 from operator import itemgetter, methodcaller
-from os.path import exists, expanduser, normpath
-from os.path import join as pathjoin
 from pathlib import Path
 from reprlib import repr as _repr
 from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
@@ -59,25 +58,24 @@ class Scraper:
 
 class JavBusScraper(Scraper):
 
-    download = None
+    xpath = None
 
     @classmethod
     def _scrape(cls, base: str = None, paths: tuple = None) -> Iterator[str]:
-
-        print(f"Scanning {base}...")
 
         if not base:
             base = "https://www.javbus.com/"
             paths = ("page", "uncensored/page", "genre/hd",
                      "uncensored/genre/hd")
 
-        if not cls.download:
-            xpath = XPath(
+        if cls.xpath is None:
+            cls.xpath = XPath(
                 './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()',
                 smart_strings=False)
-            cls.download = _get_downloader(xpath, raise_404=True)
+        download = _get_downloader(cls.xpath, raise_404=True)
 
         step = 500
+        print(f"Scanning {base}...")
         with ThreadPoolExecutor(max_workers=None) as ex:
             for path in paths:
                 lo = 1
@@ -88,8 +86,8 @@ class JavBusScraper(Scraper):
                     print(f"{lo}:{hi}..", end="", flush=True)
                     try:
                         yield from chain.from_iterable(
-                            ex.map(cls.download, (f"{base}/{path}/{page}"
-                                                  for page in range(lo, hi))))
+                            ex.map(download, (f"{base}/{path}/{page}"
+                                              for page in range(lo, hi))))
                     except LastPageReached:
                         break
                     lo = hi
@@ -117,8 +115,6 @@ class JavDBScraper(Scraper):
                 limit: int = None,
                 xpath: Callable = None) -> Iterator[str]:
 
-        print(f"Scanning javdb...")
-
         if not paths:
             paths = ("uncensored", "")
             limit = 81
@@ -127,6 +123,7 @@ class JavDBScraper(Scraper):
                 smart_strings=False)
         download = _get_downloader(xpath)
 
+        print(f"Scanning javdb...")
         with ThreadPoolExecutor(max_workers=3) as ex:
             fts = as_completed(
                 ex.submit(download, f"https://javdb.com/{path}?page={page}")
@@ -172,10 +169,10 @@ class MTeamScraper:
     def __init__(self, limit: int, av_page: str, non_av_page: str,
                  username: str, password: str, cache_dir: str) -> None:
 
-        cache_dir = normpath(cache_dir)
+        cache_dir = op.normpath(cache_dir)
         self._cache_dirs = (
-            pathjoin(cache_dir, "non_av"),
-            pathjoin(cache_dir, "av"),
+            op.join(cache_dir, "non_av"),
+            op.join(cache_dir, "av"),
         )
         self._limit = limit
         self._pages = (non_av_page, av_page)
@@ -253,6 +250,8 @@ class MTeamScraper:
         baseurl = urljoin(self.DOMAIN, baseurl)
         matcher = re.compile(r"id=([0-9]+)").search
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
+        join = op.join
+        exists = op.exists
 
         print(f"Scanning mteam ({self._limit} pages)...", end="", flush=True)
         self._login()
@@ -272,15 +271,13 @@ class MTeamScraper:
 
                 for link in ft.result():
                     try:
-                        path = pathjoin(cache_dir, matcher(link)[1] + ".txt")
+                        path = join(cache_dir, matcher(link)[1] + ".txt")
                     except TypeError:
                         continue
                     if exists(path):
                         yield path
                     else:
-                        pool.append(
-                            ex.submit(self._dl_torrent,
-                                      urljoin(self.DOMAIN, link), path))
+                        pool.append(ex.submit(self._dl_torrent, link, path))
             if pool:
                 yield from filter(
                     None, map(methodcaller("result"), as_completed(pool)))
@@ -305,10 +302,12 @@ class MTeamScraper:
             sys.exit()
         self._logined = True
 
-    @staticmethod
-    def _dl_torrent(link: str, path: str):
+    @classmethod
+    def _dl_torrent(cls, link: str, path: str):
 
+        link = urljoin(cls.DOMAIN, link)
         print("Downloading:", link)
+
         try:
             content = _request(link).content
         except RequestException:
@@ -542,9 +541,12 @@ class Analyzer:
         with ProcessPoolExecutor(max_workers=None) as ex, open(
                 unmatch_raw, "w", encoding="utf-8") as f:
 
-            for content in ex.map(self._match_av,
-                                  self._mteam.get_path(True, self._fetch),
-                                  chunksize=100):
+            for content in ex.map(
+                    self._match_av,
+                    self._mteam.get_path(is_av=True, fetch=self._fetch),
+                    chunksize=100,
+            ):
+
                 total += 1
                 if content:
                     unmatched += 1
@@ -604,9 +606,12 @@ class Analyzer:
 
         with ProcessPoolExecutor(max_workers=None) as ex:
 
-            for video in ex.map(self._match_non_av,
-                                self._mteam.get_path(False, self._fetch),
-                                chunksize=100):
+            for video in ex.map(
+                    self._match_non_av,
+                    self._mteam.get_path(is_av=False, fetch=self._fetch),
+                    chunksize=100,
+            ):
+
                 total += 1
                 if video:
                     mismatched += 1
@@ -722,8 +727,8 @@ def parse_config(configfile: str):
 
     if parser.read(configfile):
         config = parser["DEFAULT"]
-        config["output_file"] = expanduser(config["output_file"])
-        config["cache_dir"] = expanduser(config["cache_dir"])
+        config["output_file"] = op.expanduser(config["output_file"])
+        config["cache_dir"] = op.expanduser(config["cache_dir"])
         return config
 
     with open(configfile, "w", encoding="utf-8") as f:

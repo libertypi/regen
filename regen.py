@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """
 Main module for computing regular expressions from a list of strings/regex.
 
@@ -40,19 +39,11 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from itertools import chain, compress, filterfalse
-from typing import (
-    Dict,
-    FrozenSet,
-    Iterable,
-    Iterator,
-    List,
-    Optional,
-    Set,
-    Tuple,
-    Union,
-)
+from typing import (Dict, FrozenSet, Iterable, Iterator, List, Optional, Set,
+                    Tuple, Union)
 
-from ortools.sat.python.cp_model import FEASIBLE, OPTIMAL, CpModel, CpSolver, LinearExpr
+from ortools.sat.python.cp_model import (FEASIBLE, OPTIMAL, CpModel, CpSolver,
+                                         LinearExpr)
 
 _specials = frozenset("{}()[]|?*+")
 _not_special = _specials.isdisjoint
@@ -64,8 +55,8 @@ Token = Tuple[str]
 
 class Parser:
 
-    __slots__ = ("result", "hold", "charset", "index", "subParser", "token", "_input")
-    _is_char_block = re.compile(r"\\?.|\[(\^?\])?([^]]|\\\])*\]").fullmatch
+    __slots__ = ("result", "hold", "charset", "index", "subParser", "token",
+                 "_input")
 
     def __init__(self) -> None:
         self.result = [[]]
@@ -77,11 +68,11 @@ class Parser:
     def parse(self, _input: Union[str, List[str]]) -> Iterator[Token]:
         """Convert a regular expression to a tokenset."""
 
-        try:
+        if isinstance(_input, str):
             token = _split_token(_input)
-        except TypeError:
-            if not isinstance(_input, list):
-                raise TypeError(f"Wrong type feed to Parser: {type(_input)}")
+        else:
+            assert isinstance(
+                _input, list), f"expect str or list input, not {type(_input)!r}"
             token = _input
 
         if _not_special(token):  # Not regex we can handle
@@ -116,7 +107,8 @@ class Parser:
                     self._parenStrategy()
 
                 else:
-                    raise ValueError(f"Invalid character '{char}': '{self.string}'")
+                    raise ValueError(
+                        f"Invalid character '{char}': '{self.string}'")
 
             else:
                 suffix = eatsuffix()
@@ -151,7 +143,7 @@ class Parser:
                 end = self.token.index("]", start + 3) + 1
             except ValueError:
                 raise ValueError(f"Bad character set: {self.string}")
-            if "[" in self.token[start + 1 : end - 1]:
+            if "[" in self.token[start + 1:end - 1]:
                 raise ValueError(f"Nested character set: {self.string}")
 
             self.index = end
@@ -164,14 +156,10 @@ class Parser:
                         if charset:
                             break
                     elif char == "-":
-                        if self._peek() != "]":
-                            try:
-                                lo = charset.pop()
-                                hi = eat()
-                                char = f"[{lo}{char}{hi}]"
-                            except IndexError:
-                                # "-" is the first char in charset
-                                pass
+                        if self._peek() != "]" and charset:
+                            lo = charset.pop()
+                            hi = eat()
+                            char = f"[{lo}{char}{hi}]"
                     else:
                         raise ValueError(f"Nested character set: {self.string}")
                 charset.append(char)
@@ -231,11 +219,10 @@ class Parser:
             result.extend(tuple([*x, *y] for y in subToken for x in result))
         else:
             substr = optimize(frozenset(subToken), omitOuterParen=True)
-            hold.append(
-                substr + suffix
-                if self._is_char_block(substr)
-                else f"({substr}){suffix}"
-            )
+            if re.fullmatch(r"\\?.|\[(\^?\])?([^]]|\\\])*\]", substr):
+                hold.append(substr + suffix)
+            else:
+                hold.append(f"({substr}){suffix}")
 
     def _concat_hold(self):
         hold = self.hold
@@ -269,7 +256,8 @@ class Parser:
             try:
                 # +2 so "{}" will not be matched
                 suffixEnd = self.token.index("}", suffixStart + 2)
-                if not _rangeChars.issuperset(self.token[suffixStart + 1 : suffixEnd]):
+                if not _rangeChars.issuperset(
+                        self.token[suffixStart + 1:suffixEnd]):
                     raise ValueError
             except ValueError:
                 raise ValueError(f"Bad range format: {self.string}")
@@ -290,7 +278,7 @@ class Parser:
 
     @property
     def string(self):
-        return self._input if isinstance(self._input, str) else "".join(self._input)
+        return "".join(self._input)
 
 
 @lru_cache(maxsize=4096)
@@ -313,7 +301,8 @@ def optimize(tokenSet: FrozenSet[Token], omitOuterParen: bool = False) -> str:
         return ""
 
 
-def _wordStrategy(tokenSet: Set[Token], quantifier: str, omitOuterParen: bool) -> str:
+def _wordStrategy(tokenSet: Set[Token], quantifier: str,
+                  omitOuterParen: bool) -> str:
 
     tokenSetLength = len(tokenSet)
     if tokenSetLength == 1:
@@ -366,13 +355,9 @@ def _wordStrategy(tokenSet: Set[Token], quantifier: str, omitOuterParen: bool) -
                     right = optimize(frozenset(v))
                     string = (left + right) if i else (right + left)
                     length = len(key)
-                    value = (
-                        sum(map(len, chain.from_iterable(key)))
-                        + length
-                        + 2 * (length == tokenSetLength)
-                        - len(string)
-                        - 1
-                    ) * factor - length
+                    value = (sum(map(len, chain.from_iterable(key))) + length +
+                             2 * (length == tokenSetLength) - len(string) -
+                             1) * factor - length
                     candidate[key] = (value, string) if value > 0 else None
 
                 if candidate[key]:
@@ -433,9 +418,8 @@ def _is_word(token: Token) -> bool:
     return sum(map(len, token)) > 1
 
 
-def _filter_affix(
-    d: Dict[Token, Set[Token]], intersect: Set[Token] = None
-) -> Dict[Token, Set[Token]]:
+def _filter_affix(d: Dict[Token, Set[Token]],
+                  intersect: Set[Token] = None) -> Dict[Token, Set[Token]]:
     """Keep groups which divide the same words at max common subsequence,
     and remove single member groups.
 
@@ -459,17 +443,15 @@ def _filter_affix(
     return {k: d[k] for _, k in tmp.values()}
 
 
-def _intersect_affix(
-    d: Dict[Token, Set[Token]], r: Set[Token]
-) -> Iterator[Tuple[Token, Set[Token]]]:
+def _intersect_affix(d: Dict[Token, Set[Token]],
+                     r: Set[Token]) -> Iterator[Tuple[Token, Set[Token]]]:
     for i in d.items():
         i[1].intersection_update(r)
         yield i
 
 
-def _optimize_group(
-    unvisited: Set[FrozenSet[Token]], candidate: Dict[FrozenSet[Token], Tuple[int, str]]
-):
+def _optimize_group(unvisited: Set[FrozenSet[Token]],
+                    candidate: Dict[FrozenSet[Token], Tuple[int, str]]):
     """Divide candidates into groups that each group is internally connected
     with common members. Then for each group, find the best non-overlapping
     members to reach the maximum length reduction.
@@ -515,15 +497,14 @@ def _optimize_group(
                 AddImplication(nextVar, currentVarNot)
 
         model.Maximize(
-            LinearExpr.ScalProd(pool.values(), tuple(candidate[k][0] for k in pool))
-        )
+            LinearExpr.ScalProd(pool.values(),
+                                tuple(candidate[k][0] for k in pool)))
 
         solver = CpSolver()
         status = solver.Solve(model)
         if status != OPTIMAL and status != FEASIBLE:
             raise RuntimeError(
-                f"CP-SAT Solver failed, status: {solver.StatusName(status)}"
-            )
+                f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
 
         yield from compress(pool, map(solver.BooleanValue, pool.values()))
         pool.clear()
@@ -569,7 +550,8 @@ class Regen:
         elif not isinstance(wordlist, Iterable):
             raise TypeError("Input should be a list of strings.")
 
-        self._tokens = frozenset(chain.from_iterable(map(Parser().parse, wordlist)))
+        self._tokens = frozenset(
+            chain.from_iterable(map(Parser().parse, wordlist)))
         self._cache = {}
 
     def to_words(self) -> List[str]:
@@ -586,7 +568,8 @@ class Regen:
 
         regex = self._cache.get(omitOuterParen)
         if regex is None:
-            regex = self._cache[omitOuterParen] = optimize(self._tokens, omitOuterParen)
+            regex = self._cache[omitOuterParen] = optimize(
+                self._tokens, omitOuterParen)
         return regex
 
     def raise_for_verify(self):
@@ -602,8 +585,7 @@ class Regen:
         for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
             if _not_special(i):
                 raise ValueError(
-                    f"Computed regex does not fully match this word: '{i}'"
-                )
+                    f"Computed regex does not fully match this word: '{i}'")
 
 
 def parse_arguments():
@@ -611,7 +593,8 @@ def parse_arguments():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="""Generate regular expressions from a set of words and regexes.
+        description=
+        """Generate regular expressions from a set of words and regexes.
 Author: David Pi <libertypi@gmail.com>""",
         epilog="""examples:
   %(prog)s cat bat at "fat|boat"
