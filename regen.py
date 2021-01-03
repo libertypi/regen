@@ -55,8 +55,7 @@ Token = Tuple[str]
 
 class Parser:
 
-    __slots__ = ("result", "hold", "charset", "index", "subParser", "token",
-                 "_input")
+    __slots__ = ("result", "hold", "charset", "index", "subParser", "token")
 
     def __init__(self) -> None:
         self.result = [[]]
@@ -68,22 +67,17 @@ class Parser:
     def parse(self, _input: Union[str, List[str]]) -> Iterator[Token]:
         """Convert a regular expression to a tokenset."""
 
-        if isinstance(_input, str):
-            token = _split_token(_input)
-        else:
-            assert isinstance(
-                _input, list), f"expect str or list input, not {type(_input)!r}"
-            token = _input
+        if not isinstance(_input, list):
+            _input = _split_token(_input)
 
-        if _not_special(token):  # Not regex we can handle
-            yield tuple(token)
+        if _not_special(_input):  # Not regex we can handle
+            yield tuple(_input)
             return
 
         if self.index != 0:
             raise RuntimeError("Parser is not idle.")
 
-        self.token = token
-        self._input = _input
+        self.token = _input
 
         result = self.result
         hold_append = self.hold.append
@@ -126,7 +120,7 @@ class Parser:
         yield from map(tuple, result)
         result[:] = [[]]
         self.index = 0
-        self.token = self._input = None
+        self.token = None
 
     def _charsetStrategy(self):
 
@@ -156,7 +150,7 @@ class Parser:
                         if charset:
                             break
                     elif char == "-":
-                        if self._peek() != "]" and charset:
+                        if charset and self._peek() != "]":
                             lo = charset.pop()
                             hi = eat()
                             char = f"[{lo}{char}{hi}]"
@@ -278,7 +272,7 @@ class Parser:
 
     @property
     def string(self):
-        return "".join(self._input)
+        return "".join(self.token)
 
 
 @lru_cache(maxsize=4096)
@@ -443,8 +437,7 @@ def _filter_affix(d: Dict[Token, Set[Token]],
     return {k: d[k] for _, k in tmp.values()}
 
 
-def _intersect_affix(d: Dict[Token, Set[Token]],
-                     r: Set[Token]) -> Iterator[Tuple[Token, Set[Token]]]:
+def _intersect_affix(d: Dict[Token, Set[Token]], r: Set[Token]):
     for i in d.items():
         i[1].intersection_update(r)
         yield i
