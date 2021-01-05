@@ -671,7 +671,7 @@ class Analyzer:
 
 def _request(url: str, **kwargs):
 
-    response = session.get(url, timeout=(7, 28), **kwargs)
+    response = session.get(url, timeout=(6.1, 27), **kwargs)
     response.raise_for_status()
     return response
 
@@ -680,7 +680,7 @@ def _get_downloader(xpath: XPath, raise_404: bool = False):
 
     def downloader(url: str, **kwargs):
 
-        response = session.get(url, timeout=(7, 28), **kwargs)
+        response = session.get(url, timeout=(6.1, 27), **kwargs)
         try:
             response.raise_for_status()
         except HTTPError:
