@@ -300,8 +300,7 @@ class MTeamScraper:
                 )
                 res.raise_for_status()
         except RequestException as e:
-            print(f'login failed: {e}', file=sys.stderr)
-            sys.exit()
+            sys.exit(f"login mteam failed: {e}")
         self._logined = True
 
     @classmethod
@@ -507,13 +506,10 @@ class Analyzer:
                     raise ValueError
 
         except FileNotFoundError:
-            print(f'{regex_file} not found.', file=sys.stderr)
-            sys.exit()
+            sys.exit(f"{regex_file} not found.")
 
         except ValueError:
-            print("regex file should contain one and only one line",
-                  file=sys.stderr)
-            sys.exit()
+            sys.exit("regex file should contain one and only one line")
 
         self._matcher = re.compile(f"{regex[:i]}(?P<m>{regex[i+1:]}",
                                    flags=re.M).search
@@ -736,8 +732,7 @@ def parse_config(configfile: str):
     with open(configfile, "w", encoding="utf-8") as f:
         parser.write(f)
 
-    print(f"Please check {configfile} before running me again.")
-    sys.exit()
+    sys.exit(f"Please edit {configfile} before running me again.")
 
 
 def parse_arguments():

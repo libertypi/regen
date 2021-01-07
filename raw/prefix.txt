@@ -162,6 +162,7 @@ aukb
 aukg
 auks
 avd
+averv
 avgl
 avgp
 avhd
@@ -226,6 +227,7 @@ beb
 bebe
 bell
 bfaz
+bfd
 bged
 bgn
 bgsd
@@ -911,6 +913,7 @@ ftds
 ftht
 ftn
 fts
+ftvr
 ftx
 fufk
 fufu
@@ -1363,6 +1366,7 @@ jpsvr
 jrw
 jrzd
 jrze
+jstk
 jtdv
 juc
 juda
@@ -1542,6 +1546,7 @@ kumd
 kuni
 kunk
 kura
+kuse
 kusr
 kwbd
 kwe
@@ -1696,6 +1701,7 @@ mchar
 mcma
 mcso
 mcsr
+mcst
 mct
 mdar
 mdb
@@ -2170,6 +2176,7 @@ orst
 oru
 osbr
 osd
+osst
 osv
 otf
 otim
@@ -2332,6 +2339,7 @@ raw
 rbb
 rbc
 rbd
+rbk
 rbmx
 rbn
 rbnd
@@ -2944,6 +2952,7 @@ veen
 vema
 ven
 venu
+venx
 veo
 veq
 vero
