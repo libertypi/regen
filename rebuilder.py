@@ -592,7 +592,7 @@ class Analyzer:
 
     def analyze_non_av(self):
 
-        print("Mismatch testing begins...")
+        print("Mismatching test begins...")
 
         mismatched_file = self._report_dir.joinpath("mismatch_frequency.txt")
         word_searcher = re.compile(r"[a-z]+").search
