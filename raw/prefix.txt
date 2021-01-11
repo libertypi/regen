@@ -165,7 +165,6 @@ avd
 averv
 avgl
 avgp
-avhd
 avkh
 avop
 avopvr
@@ -345,7 +344,6 @@ cand
 cao
 caoh
 capi
-carem
 carib
 case
 casmani
@@ -1155,6 +1153,7 @@ hmn
 hmnf
 hmpd
 hmvf
+hmvx
 hnb
 hnbp
 hnd
@@ -1676,6 +1675,7 @@ maxvrh
 mazj
 mbd
 mbdd
+mbf
 mbkd
 mbm
 mbmh
@@ -3093,6 +3093,7 @@ ypaa
 yrbk
 yrh
 yrmn
+yrtb
 yryr
 yrz
 ysad

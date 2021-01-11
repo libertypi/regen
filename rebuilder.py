@@ -509,7 +509,7 @@ class Analyzer:
             sys.exit(f"{regex_file} not found.")
 
         except ValueError:
-            sys.exit("regex file should contain one and only one line")
+            sys.exit("invalid regex file")
 
         self._matcher = re.compile(f"{regex[:i]}(?P<m>{regex[i+1:]}",
                                    flags=re.M).search
