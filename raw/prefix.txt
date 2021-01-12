@@ -123,6 +123,7 @@ arbb
 ard
 ark
 arki
+arkj
 arle
 arm
 armd
@@ -1097,6 +1098,7 @@ herr
 herw
 herx
 hery
+hest
 het
 hetr
 hey
@@ -1443,6 +1445,7 @@ kibd
 kid
 kifd
 kil
+kimetu
 kimu
 king
 kink
@@ -2693,6 +2696,7 @@ suda
 sugo
 suji
 suke
+sun
 suns
 supa
 supd
