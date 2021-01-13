@@ -546,7 +546,7 @@ class Analyzer:
                     raise ValueError
                 i = regex.index("(", 1)
         except FileNotFoundError:
-            sys.exit(f"{regex_file} not found.")
+            sys.exit(f"{regex_file} not found")
         except ValueError:
             sys.exit("invalid regex file")
 
