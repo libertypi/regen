@@ -68,8 +68,8 @@ class Scraper:
                 download = cls._get_downloader(urljoin(base, path), xpath)
 
                 while True:
-                    hi = lo + step
                     print(f"{lo}..", end="", flush=True)
+                    hi = lo + step
                     try:
                         yield from chain.from_iterable(
                             ex.map(download, range(lo, hi)))
@@ -319,7 +319,9 @@ class MTeamScraper:
                     if exists(path):
                         yield path
                     else:
-                        pool.append(ex.submit(self._dl_torrent, link, path))
+                        pool.append(
+                            ex.submit(self._dl_torrent,
+                                      urljoin(self.DOMAIN, link), path))
 
             if pool:
                 yield from filter(
@@ -344,12 +346,10 @@ class MTeamScraper:
             sys.exit(f"login mteam failed: {e}")
         self._logined = True
 
-    @classmethod
-    def _dl_torrent(cls, link: str, path: str):
+    @staticmethod
+    def _dl_torrent(link: str, path: str):
 
-        link = urljoin(cls.DOMAIN, link)
         print("Downloading:", link)
-
         try:
             content = _request(link).content
         except RequestException:
@@ -542,13 +542,11 @@ class Analyzer:
         try:
             with open(regex_file, "r", encoding="utf-8") as f:
                 regex = f.readline().strip()
-                i = regex.index("(", 1)
                 if f.read():
                     raise ValueError
-
+                i = regex.index("(", 1)
         except FileNotFoundError:
             sys.exit(f"{regex_file} not found.")
-
         except ValueError:
             sys.exit("invalid regex file")
 
