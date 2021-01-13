@@ -16,7 +16,7 @@ from operator import itemgetter, methodcaller
 from pathlib import Path
 from reprlib import repr as _repr
 from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from lxml.etree import XPath
 from lxml.html import fromstring as html_fromstring
@@ -45,95 +45,113 @@ class Scraper:
             r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
 
         return map(itemgetter(1, 2),
-                   filter(None, map(matcher, map(str.lower, cls._scrape()))))
+                   filter(None, map(matcher, map(str.lower, cls._get_id()))))
 
     @staticmethod
-    def _scrape() -> Iterator[str]:
-        raise NotImplemented
+    def _get_id():
+        pass
 
     @staticmethod
     def get_keyword() -> Iterator[str]:
-        raise NotImplemented
+        pass
+
+    @classmethod
+    def _scrape(cls, base: str, paths: tuple, xpath: XPath,
+                step: int) -> Iterator[str]:
+
+        print(f"Scanning {urlsplit(base).netloc}")
+
+        with ThreadPoolExecutor() as ex:
+            for path in paths:
+                print(f"  /{path}: ", end="", flush=True)
+                lo = 1
+                download = cls._get_downloader(urljoin(base, path), xpath)
+
+                while True:
+                    hi = lo + step
+                    print(f"{lo}..", end="", flush=True)
+                    try:
+                        yield from chain.from_iterable(
+                            ex.map(download, range(lo, hi)))
+                    except LastPageReached as e:
+                        print(e)
+                        break
+                    lo = hi
+
+    @staticmethod
+    def _get_downloader(base: str, xpath: XPath):
+        pass
 
 
 class JavBusScraper(Scraper):
 
-    xpath = None
-
     @classmethod
-    def _scrape(cls, base: str = None, paths: tuple = None) -> Iterator[str]:
+    def _get_id(cls) -> Iterator[str]:
 
-        if not base:
-            base = "https://www.javbus.com/"
-            paths = ("page", "uncensored/page", "genre/hd",
-                     "uncensored/genre/hd")
-
-        if cls.xpath is None:
-            cls.xpath = XPath(
-                './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()',
-                smart_strings=False)
-        download = _get_downloader(cls.xpath, raise_404=True)
-
-        step = 500
-        print(f"Scanning {base}...")
-        with ThreadPoolExecutor(max_workers=None) as ex:
-            for path in paths:
-                lo = 1
-                print(f"  /{path}: ", end="", flush=True)
-
-                while True:
-                    hi = lo + step
-                    print(f"{lo}:{hi}..", end="", flush=True)
-                    try:
-                        yield from chain.from_iterable(
-                            ex.map(download, (f"{base}/{path}/{page}"
-                                              for page in range(lo, hi))))
-                    except LastPageReached:
-                        break
-                    lo = hi
-                print()
+        return cls._scrape(
+            base="https://www.javbus.com/",
+            paths=("page", "uncensored/page", "genre/hd",
+                   "uncensored/genre/hd"),
+            xpath=None,
+            step=500,
+        )
 
     @classmethod
     def get_keyword(cls):
 
-        matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         result = cls._scrape(
             base="https://www.javbus.org/",
             paths=("page", *(f"studio/{i}" for i in range(1, 5))),
+            xpath=None,
+            step=500,
         )
+        matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
 
         result = Counter(m[1].lower() for m in map(matcher, result) if m)
         for k, v in result.items():
             if v > _KEYWORD_THRESH:
                 yield k
 
+    xpath = None
+
+    @classmethod
+    def _get_downloader(cls, base: str, xpath: XPath):
+
+        xpath = cls.xpath
+        if xpath is None:
+            xpath = cls.xpath = XPath(
+                './/div[@id="waterfall"]//a[@class="movie-box"]'
+                '//span/date[1]/text()',
+                smart_strings=False)
+
+        def download(page: int):
+            try:
+                return xpath(html_fromstring(
+                    _request(f"{base}/{page}").content))
+            except HTTPError as e:
+                if e.response.status_code == 404:
+                    raise LastPageReached(page)
+                raise
+
+        return download
+
 
 class JavDBScraper(Scraper):
 
-    @staticmethod
-    def _scrape(paths: Tuple[str] = None,
-                limit: int = None,
-                xpath: Callable = None) -> Iterator[str]:
+    @classmethod
+    def _get_id(cls) -> Iterator[str]:
 
-        if not paths:
-            paths = ("uncensored", "")
-            limit = 81
-            xpath = XPath(
+        return cls._scrape(
+            base="https://javdb.com/",
+            paths=("uncensored", ""),
+            xpath=XPath(
                 './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
-                smart_strings=False)
-        download = _get_downloader(xpath)
-
-        print(f"Scanning javdb...")
-        with ThreadPoolExecutor(max_workers=3) as ex:
-            fts = as_completed(
-                ex.submit(download, f"https://javdb.com/{path}?page={page}")
-                for page in range(1, limit)
-                for path in paths)
-            yield from chain.from_iterable(map(methodcaller("result"), fts))
+                smart_strings=False),
+            step=100,
+        )
 
     @classmethod
     def get_keyword(cls):
-
         xpath = XPath(
             '//div[@id="series"]//div[@class="box"]'
             f'/a[@title and re:match(span/text(), "[0-9]+") > {_KEYWORD_THRESH}]'
@@ -141,21 +159,45 @@ class JavDBScraper(Scraper):
             namespaces={"re": "http://exslt.org/regular-expressions"},
             smart_strings=False,
         )
+        result = cls._scrape(
+            base="https://javdb.com/",
+            paths=("series/western",),
+            xpath=xpath,
+            step=100,
+        )
+
         matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
-
-        for title in cls._scrape(paths=("series/western",),
-                                 limit=5,
-                                 xpath=xpath):
-
+        for title in result:
             title = title.replace(" ", "").lower()
             if matcher(title):
                 yield title
+
+    nav_xp = None
+
+    @classmethod
+    def _get_downloader(cls, base: str, xpath: XPath):
+
+        nav_xp = cls.nav_xp
+        if nav_xp is None:
+            nav_xp = cls.nav_xp = XPath(
+                '//section/div[@class="container"]'
+                '//ul[@class="pagination-list"]/li'
+                '/a[contains(@class, "is-current") and normalize-space()=$page]'
+            )
+
+        def download(page: int):
+            tree = html_fromstring(_request(f"{base}?page={page}").content)
+            if nav_xp(tree, page=page):
+                return xpath(tree)
+            raise LastPageReached(page)
+
+        return download
 
 
 class GithubScraper(Scraper):
 
     @staticmethod
-    def _scrape() -> List[str]:
+    def _get_id() -> List[str]:
 
         print("Downloading github database...")
         return _request(
@@ -223,7 +265,7 @@ class MTeamScraper:
                 if matcher(entry.name):
                     yield entry.path
 
-    def _from_web(self, cache_dir: str, baseurl: str,
+    def _from_web(self, cache_dir: str, url: str,
                   cjk_title_only: bool) -> Iterator[str]:
 
         if cjk_title_only:
@@ -244,11 +286,10 @@ class MTeamScraper:
                 '/descendant::a[contains(@href, "download.php?")][1]/@href',
                 smart_strings=False,
             )
-        download = _get_downloader(xpath)
 
         pool = []
         idx = 0
-        baseurl = urljoin(self.DOMAIN, baseurl)
+        url = urljoin(self.DOMAIN, url)
         matcher = re.compile(r"\bid=([0-9]+)").search
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
         join = op.join
@@ -260,7 +301,7 @@ class MTeamScraper:
         with ThreadPoolExecutor(max_workers=None) as ex:
 
             for ft in as_completed(
-                    ex.submit(download, baseurl, params={"page": i})
+                    ex.submit(_request, url, params={"page": i})
                     for i in range(1, self._limit + 1)):
 
                 idx += 1
@@ -270,7 +311,7 @@ class MTeamScraper:
                     else:
                         print(f"{idx}..{self._limit}")
 
-                for link in ft.result():
+                for link in xpath(html_fromstring(ft.result().content)):
                     try:
                         path = join(cache_dir, matcher(link)[1] + ".txt")
                     except TypeError:
@@ -670,22 +711,6 @@ def _request(url: str, **kwargs):
     response = session.get(url, timeout=(6.1, 27), **kwargs)
     response.raise_for_status()
     return response
-
-
-def _get_downloader(xpath: XPath, raise_404: bool = False):
-
-    def downloader(url: str, **kwargs):
-
-        response = session.get(url, timeout=(6.1, 27), **kwargs)
-        try:
-            response.raise_for_status()
-        except HTTPError:
-            if raise_404 and response.status_code == 404:
-                raise LastPageReached
-            raise
-        return xpath(html_fromstring(response.content))
-
-    return downloader
 
 
 _freq_words = None

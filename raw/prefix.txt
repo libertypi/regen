@@ -1556,6 +1556,7 @@ kwpo
 kws
 kwsd
 kyk
+kymi
 kyod
 kyun
 labb
@@ -2208,6 +2209,7 @@ pcde
 pdv
 pdx
 pdz
+ped
 pet
 peworld
 pfck
