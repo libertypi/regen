@@ -65,7 +65,7 @@ class Scraper:
             for path in paths:
                 print(f"  /{path}: ", end="", flush=True)
                 lo = 1
-                download = cls._get_downloader(urljoin(base, path), xpath)
+                download = cls._get_downloader(base + path, xpath)
 
                 while True:
                     print(f"{lo}..", end="", flush=True)
