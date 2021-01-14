@@ -2483,7 +2483,6 @@ sddm
 sdds
 sden
 sdfk
-sdgn
 sdiy
 sdjs
 sdmf

@@ -217,8 +217,11 @@ class MTeamScraper:
             op.join(cache_dir, "non_av"),
             op.join(cache_dir, "av"),
         )
+        self._pages = (
+            urljoin(self.DOMAIN, non_av_page),
+            urljoin(self.DOMAIN, av_page),
+        )
         self._limit = limit
-        self._pages = (non_av_page, av_page)
         self._account = {"username": username, "password": password}
         self._logined = False
 
@@ -289,7 +292,6 @@ class MTeamScraper:
 
         pool = []
         idx = 0
-        url = urljoin(self.DOMAIN, url)
         matcher = re.compile(r"\bid=([0-9]+)").search
         step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
         join = op.join
@@ -332,8 +334,7 @@ class MTeamScraper:
         if self._logined:
             return
         try:
-            res = session.head(urljoin(self.DOMAIN, self._pages[0]),
-                               allow_redirects=True)
+            res = session.head(self._pages[0], allow_redirects=True)
             res.raise_for_status()
             if "/login.php" in res.url:
                 res = session.post(
