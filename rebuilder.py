@@ -1,30 +1,26 @@
 #!/usr/bin/env python3
 
 import argparse
+import concurrent.futures as cf
 import os
 import os.path as op
 import pickle
 import re
+import reprlib
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
-                                as_completed)
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, tee
 from operator import itemgetter, methodcaller
 from pathlib import Path
-from reprlib import repr as _repr
 from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
 from urllib.parse import urljoin, urlsplit
 
+import requests
 from lxml.etree import XPath
 from lxml.html import fromstring as html_fromstring
-from requests import HTTPError, RequestException, Session
-from requests.adapters import HTTPAdapter
-from requests.cookies import create_cookie
 from torrentool.api import Torrent
-from torrentool.exceptions import TorrentoolException
 
 from regen import Regen
 
@@ -61,7 +57,7 @@ class Scraper:
 
         print(f"Scanning {urlsplit(base).netloc}")
 
-        with ThreadPoolExecutor() as ex:
+        with cf.ThreadPoolExecutor() as ex:
             for path in paths:
                 print(f"  /{path}: ", end="", flush=True)
                 lo = 1
@@ -128,7 +124,7 @@ class JavBusScraper(Scraper):
             try:
                 return xpath(html_fromstring(
                     _request(f"{base}/{page}").content))
-            except HTTPError as e:
+            except requests.HTTPError as e:
                 if e.response.status_code == 404:
                     raise LastPageReached(page)
                 raise
@@ -300,9 +296,9 @@ class MTeamScraper:
         print(f"Scanning mteam ({self._limit} pages)...", end="", flush=True)
         self._login()
 
-        with ThreadPoolExecutor(max_workers=None) as ex:
+        with cf.ThreadPoolExecutor(max_workers=None) as ex:
 
-            for ft in as_completed(
+            for ft in cf.as_completed(
                     ex.submit(_request, url, params={"page": i})
                     for i in range(1, self._limit + 1)):
 
@@ -327,7 +323,7 @@ class MTeamScraper:
 
             if pool:
                 yield from filter(
-                    None, map(methodcaller("result"), as_completed(pool)))
+                    None, map(methodcaller("result"), cf.as_completed(pool)))
 
     def _login(self):
 
@@ -343,7 +339,7 @@ class MTeamScraper:
                     headers={"referer": self.DOMAIN + "login.php"},
                 )
                 res.raise_for_status()
-        except RequestException as e:
+        except requests.RequestException as e:
             sys.exit(f"login mteam failed: {e}")
         self._logined = True
 
@@ -353,7 +349,7 @@ class MTeamScraper:
         print("Downloading:", link)
         try:
             content = _request(link).content
-        except RequestException:
+        except requests.RequestException:
             print(f"Downloading failed: {link}", file=sys.stderr)
             return
 
@@ -362,7 +358,7 @@ class MTeamScraper:
             with open(path, "w", encoding="utf-8") as f:
                 f.writelines(i[0].lower() + "\n" for i in filelist)
 
-        except (TorrentoolException, TypeError, OSError):
+        except Exception:
 
             torrent_file = path + ".torrent"
             spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
@@ -576,7 +572,7 @@ class Analyzer:
         word_counter = Counter()
         tmp = set()
 
-        with ProcessPoolExecutor(max_workers=None) as ex, open(
+        with cf.ProcessPoolExecutor(max_workers=None) as ex, open(
                 unmatch_raw, "w", encoding="utf-8") as f:
 
             for content in ex.map(
@@ -642,7 +638,7 @@ class Analyzer:
         torrent_counter = Counter()
         tmp = set()
 
-        with ProcessPoolExecutor(max_workers=None) as ex:
+        with cf.ProcessPoolExecutor(max_workers=None) as ex:
 
             for video in ex.map(
                     self._match_non_av,
@@ -702,7 +698,7 @@ class Analyzer:
         yield "{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format(
             "uniq", "occur", "word", "strings", "")
         for i, j, k, s in result:
-            yield f"{i:6d}  {j:6d}  {k:15}  {_repr(s)[1:-1]}\n"
+            yield f"{i:6d}  {j:6d}  {k:15}  {reprlib.repr(s)[1:-1]}\n"
 
 
 def _request(url: str, **kwargs):
@@ -821,23 +817,25 @@ def _init_session(session_file: Path):
     except (OSError, pickle.PickleError):
         pass
     else:
-        if isinstance(session, Session):
+        if isinstance(session, requests.Session):
             return session
 
-    session = Session()
+    session = requests.Session()
     session.cookies.set_cookie(
-        create_cookie(domain="www.javbus.com", name="existmag", value="all"))
+        requests.cookies.create_cookie(domain="www.javbus.com",
+                                       name="existmag",
+                                       value="all"))
     session.headers.update({
         "User-Agent":
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"
     })
-    adapter = HTTPAdapter(max_retries=5)
+    adapter = requests.adapters.HTTPAdapter(max_retries=5)
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
 
 
-def _save_session(session: Session, session_file: Path):
+def _save_session(session: requests.Session, session_file: Path):
 
     try:
         with open(session_file, "wb") as f:
