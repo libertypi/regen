@@ -211,19 +211,17 @@ class Builder:
 
         try:
             with open(self._jsonfile, "r", encoding="utf-8") as f:
-                json_read = json.load(f)
-        except (OSError, ValueError):
-            json_read = None
+                self._json_read = json.load(f)
+        except (FileNotFoundError, ValueError):
+            self._json_read = None
         self._json_new = {}
 
         keyword = self.keyword = self._build_regex(
             name="keyword",
-            json_read=json_read,
             omitOuterParen=True,
         )
         prefix = self._build_regex(
             name="prefix",
-            json_read=json_read,
             omitOuterParen=False,
         )
 
@@ -231,7 +229,7 @@ class Builder:
         if not (keyword and prefix):
             return
 
-        if json_read != self._json_new:
+        if self._json_read != self._json_new:
             with open(self._jsonfile, "w", encoding="utf-8") as f:
                 json.dump(self._json_new, f, indent=4)
 
@@ -239,8 +237,7 @@ class Builder:
         self._update_file(self._output_file, regex)
         return regex
 
-    def _build_regex(self, name: str, json_read: Dict[str, Dict],
-                     omitOuterParen: bool) -> str:
+    def _build_regex(self, name: str, omitOuterParen: bool) -> str:
 
         print(f" {name.upper()} ".center(50, "-"))
 
@@ -249,7 +246,7 @@ class Builder:
             try:
                 result = {
                     i: v
-                    for k, v in json_read[name].items()
+                    for k, v in self._json_read[name].items()
                     if (i := k.strip().lower()) and v > 0
                 }
             except (TypeError, KeyError, AttributeError):
