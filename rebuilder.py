@@ -2,9 +2,9 @@
 
 import argparse
 import concurrent.futures as cf
+import json
 import os
 import os.path as op
-import pickle
 import re
 import reprlib
 import subprocess
@@ -14,7 +14,7 @@ from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, tee
 from operator import itemgetter, methodcaller
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, List, Optional, Set, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple
 from urllib.parse import urljoin, urlsplit
 
 import requests
@@ -23,9 +23,6 @@ from lxml.html import fromstring as html_fromstring
 from torrentool.api import Torrent
 
 from regen import Regen
-
-_PREFIX_THRESH = 5
-_KEYWORD_THRESH = 10
 
 
 class LastPageReached(Exception):
@@ -48,7 +45,7 @@ class Scraper:
         pass
 
     @staticmethod
-    def get_keyword() -> Iterator[str]:
+    def get_keyword() -> Iterable[Tuple[str, int]]:
         pass
 
     @classmethod
@@ -102,11 +99,8 @@ class JavBusScraper(Scraper):
             step=500,
         )
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
-
         result = Counter(m[1].lower() for m in map(matcher, result) if m)
-        for k, v in result.items():
-            if v > _KEYWORD_THRESH:
-                yield k
+        return result.items()
 
     xpath = None
 
@@ -147,26 +141,25 @@ class JavDBScraper(Scraper):
         )
 
     @classmethod
-    def get_keyword(cls):
-        xpath = XPath(
-            '//div[@id="series"]//div[@class="box"]'
-            f'/a[@title and re:match(span/text(), "[0-9]+") > {_KEYWORD_THRESH}]'
-            '/strong/text()',
-            namespaces={"re": "http://exslt.org/regular-expressions"},
-            smart_strings=False,
-        )
+    def get_keyword(cls) -> Iterable[Tuple[str, int]]:
+
         result = cls._scrape(
             base="https://javdb.com/",
             paths=("series/western",),
-            xpath=xpath,
+            xpath=XPath('//div[@id="series"]//div[@class="box"]'
+                        '/a[@title and strong and span]'),
             step=100,
         )
+        title_matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
+        freq_matcher = re.compile(r"\d+").search
 
-        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
-        for title in result:
-            title = title.replace(" ", "").lower()
-            if matcher(title):
-                yield title
+        for t in result:
+            title = t.findtext("strong").replace(" ", "").lower()
+            if title_matcher(title):
+                try:
+                    yield title, int(freq_matcher(t.findtext("span"))[0])
+                except TypeError:
+                    pass
 
     nav_xp = None
 
@@ -201,11 +194,179 @@ class GithubScraper(Scraper):
         ).json()
 
 
-class MTeamScraper:
+class Builder:
+
+    def __init__(self, *, output_file: str, fetch: bool, keyword_max: int,
+                 prefix_max: int, mgs_json: str, raw_dir: str) -> None:
+
+        self._output_file = Path(output_file)
+        self._mgs_json = Path(mgs_json) if mgs_json else None
+        self._raw_dir = Path(raw_dir)
+        self._jsonfile = self._raw_dir.joinpath("data.json")
+        self._fetch = fetch
+        self._keyword_max = keyword_max
+        self._prefix_max = prefix_max
+
+    def build(self):
+
+        try:
+            with open(self._jsonfile, "r", encoding="utf-8") as f:
+                self._json_old = json.load(f)
+        except (OSError, ValueError):
+            self._json_old = None
+        self._json_new = {}
+
+        keyword = self.keyword = self._build_regex("keyword", True)
+        prefix = self._build_regex("prefix", False)
+
+        print("-" * 50)
+        if not (keyword and prefix):
+            return
+
+        if self._json_old != self._json_new:
+            with open(self._jsonfile, "w", encoding="utf-8") as f:
+                json.dump(self._json_new, f, indent=4)
+
+        regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
+        self._update_file(self._output_file, regex)
+        return regex
+
+    def _build_regex(self, name: str, omitOuterParen: bool) -> str:
+
+        print(f" {name.upper()} ".center(50, "-"))
+
+        result = None
+        if not self._fetch:
+            try:
+                result = {
+                    i: v
+                    for k, v in self._json_old[name].items()
+                    if (i := k.strip().lower()) and v > 0
+                }
+            except (TypeError, KeyError, AttributeError):
+                pass
+
+        if not result:
+            result = getattr(self, f"_fetch_{name}")()
+
+        print(f"Total: {sum(result.values())}, unique: {len(result)}")
+
+        result = sorted(result.items(), key=itemgetter(1), reverse=True)
+        self._json_new[name] = dict(result)
+
+        limit = getattr(self, f"_{name}_max")
+        if 0 < limit < len(result):
+            i = result[limit][1]
+            for limit in range(limit + 1, len(result)):
+                j = result[limit][1]
+                if j < i:
+                    break
+                i = j
+            result = result[:limit]
+
+        print("Chosen: {} (frequency: {})".format(
+            len(result), result[-1][1] if result else None))
+
+        whitelist = self._update_file(
+            self._raw_dir.joinpath(f"{name}_whitelist.txt"))
+        blacklist = self._update_file(
+            self._raw_dir.joinpath(f"{name}_blacklist.txt"))
+
+        if name != "keyword" and self.keyword:
+            regex = chain(whitelist, blacklist, (self.keyword,))
+        else:
+            regex = chain(whitelist, blacklist)
+        regex = re.compile("|".join(regex)).fullmatch
+        result = set(filterfalse(regex, map(itemgetter(0), result)))
+
+        result.update(whitelist)
+        result.difference_update(blacklist)
+        result = sorted(result)
+
+        print(f"Final: {len(result)}")
+
+        regen = Regen(result)
+        regex = regen.to_regex(omitOuterParen=omitOuterParen)
+
+        concat = "|".join(result)
+        if not omitOuterParen and len(result) > 1:
+            concat = f"({concat})"
+
+        length = len(regex)
+        diff = length - len(concat)
+        if diff > 0:
+            print(
+                f"Computed regex is {diff} characters longer than concatenation, use the latter."
+            )
+            regex = concat
+        else:
+            regen.raise_for_verify()
+            print(f"Regex length: {length} ({diff})")
+
+        return regex
+
+    @staticmethod
+    def _fetch_keyword() -> Dict[str, int]:
+
+        result = {}
+        freq_words = get_freq_words()
+        for cls in JavBusScraper, JavDBScraper:
+            for keyword, freq in cls.get_keyword():
+                if (keyword not in freq_words and
+                        result.setdefault(keyword, freq) < freq):
+                    result[keyword] = freq
+        return result
+
+    def _fetch_prefix(self) -> Dict[str, int]:
+
+        result = set()
+        for cls in JavBusScraper, JavDBScraper, GithubScraper:
+            result.update(cls.get_id())
+
+        result = Counter(map(itemgetter(0), result))
+        try:
+            with open(self._mgs_json) as f:
+                json_data = json.load(f)
+        except TypeError:
+            pass
+        except (FileNotFoundError, ValueError) as e:
+            print(e, file=sys.stderr)
+        else:
+            for d in json_data:
+                k = d["pre"]
+                v = d["freq"]
+                if len(k) > 2 and result[k] < v:
+                    result[k] = v
+        return result
+
+    @staticmethod
+    def _update_file(file: Path, content: str = None) -> Iterable[str]:
+
+        new_list = () if content is None else (content,)
+        try:
+            with open(file, "r+", encoding="utf-8") as f:
+                old_list = f.read().splitlines()
+                if not new_list:
+                    new_list = filter(None, map(str.strip, old_list))
+                    new_list = sorted(set(map(str.lower, new_list)))
+                if old_list != new_list:
+                    f.seek(0)
+                    f.writelines(i + "\n" for i in new_list)
+                    f.truncate()
+                    print(f"Update: {file}")
+        except FileNotFoundError:
+            file.parent.mkdir(parents=True, exist_ok=True)
+            with open(file, mode="w", encoding="utf-8") as f:
+                f.writelines(i + "\n" for i in new_list)
+            print(f"Create: {file}")
+        return new_list
+
+
+class MTeamCollector:
 
     DOMAIN = "https://pt.m-team.cc/"
 
-    def __init__(self, limit: int, av_page: str, non_av_page: str,
+    def __init__(self, max_pages: int, av_page: str, non_av_page: str,
                  username: str, password: str, cache_dir: str) -> None:
 
         cache_dir = op.normpath(cache_dir)
@@ -217,42 +378,17 @@ class MTeamScraper:
             urljoin(self.DOMAIN, non_av_page),
             urljoin(self.DOMAIN, av_page),
         )
-        self._limit = limit
+        self._max_pages = max_pages
         self._account = {"username": username, "password": password}
         self._logined = False
 
-    def get_id(self) -> Iterator[Tuple[str, str]]:
-
-        id_finder = re.compile(
-            r"""
-            (?:^|/)(?:[0-9]{3})?
-            ([a-z]{3,6})
-            (-)?
-            0*([1-9][0-9]{,3})
-            (?(2)(?:[hm]hb[0-9]{,2})?|[hm]hb[0-9]{,2})
-            \b.*\.(?:mp4|wmv|avi|mkv|iso)$
-            """,
-            flags=re.MULTILINE | re.VERBOSE,
-        ).finditer
-        freq_words = get_freq_words()
-
-        for path in self.get_path(is_av=True, cjk_title_only=True):
-            with open(path, "r", encoding="utf-8") as f:
-                for m in id_finder(f.read()):
-                    if m[1] not in freq_words:
-                        yield m.group(1, 3)
-
-    def get_path(self,
-                 is_av: bool,
-                 fetch: bool = True,
-                 cjk_title_only: bool = False) -> Iterator[str]:
+    def get_path(self, is_av: bool, fetch: bool = True) -> Iterator[str]:
 
         cache_dir = self._cache_dirs[is_av]
         os.makedirs(cache_dir, exist_ok=True)
 
         if fetch:
-            return self._from_web(cache_dir, self._pages[is_av], cjk_title_only)
-
+            return self._from_web(cache_dir, self._pages[is_av])
         return self._from_cache(cache_dir)
 
     @staticmethod
@@ -264,50 +400,36 @@ class MTeamScraper:
                 if matcher(entry.name):
                     yield entry.path
 
-    def _from_web(self, cache_dir: str, url: str,
-                  cjk_title_only: bool) -> Iterator[str]:
-
-        if cjk_title_only:
-            xpath = XPath(
-                r"""
-                //form[@id="form_torrent"]
-                //table[@class="torrentname"
-                    and descendant::a[contains(@href, "details.php?")]
-                    //text()[re:test(., "[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7a3]")]
-                ]/descendant::a[contains(@href, "download.php?")][1]/@href
-                """,
-                namespaces={"re": "http://exslt.org/regular-expressions"},
-                smart_strings=False,
-            )
-        else:
-            xpath = XPath(
-                '//form[@id="form_torrent"]//table[@class="torrentname"]'
-                '/descendant::a[contains(@href, "download.php?")][1]/@href',
-                smart_strings=False,
-            )
+    def _from_web(self, cache_dir: str, url: str) -> Iterator[str]:
 
         pool = []
         idx = 0
         matcher = re.compile(r"\bid=([0-9]+)").search
-        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._limit)
+        xpath = XPath(
+            '//form[@id="form_torrent"]//table[@class="torrentname"]'
+            '/descendant::a[contains(@href, "download.php?")][1]/@href',
+            smart_strings=False)
+        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._max_pages)
         join = op.join
         exists = op.exists
 
-        print(f"Scanning mteam ({self._limit} pages)...", end="", flush=True)
+        print(f"Scanning mteam ({self._max_pages} pages)...",
+              end="",
+              flush=True)
         self._login()
 
         with cf.ThreadPoolExecutor(max_workers=None) as ex:
 
             for ft in cf.as_completed(
                     ex.submit(_request, url, params={"page": i})
-                    for i in range(1, self._limit + 1)):
+                    for i in range(1, self._max_pages + 1)):
 
                 idx += 1
                 if not idx % step:
-                    if idx <= self._limit - step:
+                    if idx <= self._max_pages - step:
                         print(f"{idx}..", end="", flush=True)
                     else:
-                        print(f"{idx}..{self._limit}")
+                        print(f"{idx}..{self._max_pages}")
 
                 for link in xpath(html_fromstring(ft.result().content)):
                     try:
@@ -330,15 +452,15 @@ class MTeamScraper:
         if self._logined:
             return
         try:
-            res = session.head(self._pages[0], allow_redirects=True)
+            res = session.post(
+                url=self.DOMAIN + "takelogin.php",
+                data=self._account,
+                headers={"referer": self.DOMAIN + "login.php"},
+            )
             res.raise_for_status()
+            res = session.head(self._pages[0], allow_redirects=True)
             if "/login.php" in res.url:
-                res = session.post(
-                    url=self.DOMAIN + "takelogin.php",
-                    data=self._account,
-                    headers={"referer": self.DOMAIN + "login.php"},
-                )
-                res.raise_for_status()
+                raise requests.RequestException("invalid credentials")
         except requests.RequestException as e:
             sys.exit(f"login mteam failed: {e}")
         self._logined = True
@@ -394,142 +516,10 @@ class MTeamScraper:
         return path
 
 
-class Builder:
-
-    def __init__(self,
-                 output_file: str,
-                 mteam: MTeamScraper,
-                 fetch: bool,
-                 raw_dir: str = "raw") -> None:
-
-        self._output_file = Path(output_file)
-        self._raw_dir = Path(raw_dir)
-        self._mteam = mteam
-        self._fetch = fetch
-
-    def build(self):
-
-        self.keyword_regex = keyword = self._build_regex(
-            name="keyword",
-            omitOuterParen=True,
-        )
-        self.prefix_regex = prefix = self._build_regex(
-            name="prefix",
-            omitOuterParen=False,
-        )
-        if not (keyword and prefix):
-            return
-
-        self.regex = f"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
-        return _update_file(self._output_file, lambda _: (self.regex,))[0]
-
-    def _build_regex(self, name: str, omitOuterParen: bool):
-
-        joinpath = self._raw_dir.joinpath
-        wordlist = _update_file(
-            joinpath(f"{name}.txt"),
-            getattr(self, f"_{name}_strategy"),
-        )
-        whitelist = _update_file(
-            joinpath(f"{name}_whitelist.txt"),
-            self._normalize_words,
-        )
-        blacklist = _update_file(
-            joinpath(f"{name}_blacklist.txt"),
-            self._normalize_words,
-        )
-
-        if name != "keyword" and self.keyword_regex:
-            regex = chain(whitelist, blacklist, (self.keyword_regex,))
-        else:
-            regex = chain(whitelist, blacklist)
-        wordlist = set(
-            filterfalse(re.compile("|".join(regex)).fullmatch, wordlist))
-
-        wordlist.update(whitelist)
-        wordlist.difference_update(blacklist)
-        wordlist = sorted(wordlist)
-
-        print(f"{name} chosen: {len(wordlist)}")
-
-        regen = Regen(wordlist)
-        computed = regen.to_regex(omitOuterParen=omitOuterParen)
-
-        concat = "|".join(wordlist)
-        if not omitOuterParen and len(wordlist) > 1:
-            concat = f"({concat})"
-
-        diff = len(computed) - len(concat)
-        if diff > 0:
-            print(
-                f"{name}: Computed regex is {diff} characters longer than concatenation, use the latter."
-            )
-            return concat
-
-        regen.raise_for_verify()
-        print(f"{name} regex test passed, {-diff} characters saved.")
-        return computed
-
-    def _keyword_strategy(self, old_list: Iterable[str]) -> Set[str]:
-
-        if not self._fetch and old_list:
-            return self._normalize_words(old_list)
-
-        result = set(
-            chain(JavBusScraper.get_keyword(), JavDBScraper.get_keyword()))
-
-        result.difference_update(get_freq_words())
-        return result
-
-    def _prefix_strategy(self, old_list: Iterable[str]) -> Iterable[str]:
-
-        if not self._fetch and old_list:
-            return self._normalize_words(old_list)
-
-        result = set(self._mteam.get_id())
-        for cls in JavBusScraper, JavDBScraper, GithubScraper:
-            result.update(cls.get_id())
-
-        c = len(result)
-        result = Counter(map(itemgetter(0), result))
-        print(f"Uniq ID: {c}. Uniq prefix: {len(result)}.")
-
-        return (k for k, v in result.items() if v >= _PREFIX_THRESH)
-
-    @staticmethod
-    def _normalize_words(wordlist: Iterable[str]) -> Set[str]:
-        return set(map(str.lower, filter(None, map(str.strip, wordlist))))
-
-
-def _update_file(file: Path, stragety: Callable) -> List[str]:
-
-    try:
-        with open(file, "r+", encoding="utf-8") as f:
-            old_list = f.read().splitlines()
-            new_list = sorted(stragety(old_list))
-            if old_list != new_list:
-                f.seek(0)
-                f.writelines(i + "\n" for i in new_list)
-                f.truncate()
-                print(f"{file} updated.")
-
-    except FileNotFoundError:
-        new_list = sorted(stragety([]))
-        file.parent.mkdir(parents=True, exist_ok=True)
-        with open(file, mode="w", encoding="utf-8") as f:
-            f.writelines(i + "\n" for i in new_list)
-        print(f"{file} created.")
-
-    return new_list
-
-
 class Analyzer:
 
-    def __init__(self,
-                 regex_file: str,
-                 mteam: MTeamScraper,
-                 fetch: bool,
-                 report_dir: str = "report") -> None:
+    def __init__(self, *, regex_file: str, mteam: MTeamCollector, fetch: bool,
+                 report_dir: str) -> None:
 
         self._mteam = mteam
         self._fetch = fetch
@@ -604,13 +594,12 @@ class Analyzer:
         freq_words = get_freq_words()
         result = [(i, len(v), k, set(v))
                   for k, v in flat_counter.items()
-                  if (i := prefix_counter[k]) >= _PREFIX_THRESH and
-                  k not in freq_words]
+                  if (i := prefix_counter[k]) >= 5 and k not in freq_words]
         result.sort(reverse=True)
 
         words = [(v, k)
                  for k, v in word_counter.items()
-                 if v >= _PREFIX_THRESH and k not in freq_words]
+                 if v >= 5 and k not in freq_words]
         words.sort(reverse=True)
 
         with open(unmatch_freq, "w", encoding="utf-8") as f:
@@ -701,38 +690,58 @@ class Analyzer:
             yield f"{i:6d}  {j:6d}  {k:15}  {reprlib.repr(s)[1:-1]}\n"
 
 
+def _init_session():
+
+    session = requests.Session()
+    session.cookies.set_cookie(
+        requests.cookies.create_cookie(domain="www.javbus.com",
+                                       name="existmag",
+                                       value="all"))
+    session.headers.update({
+        "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"
+    })
+    adapter = requests.adapters.HTTPAdapter(max_retries=5)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 def _request(url: str, **kwargs):
 
-    response = session.get(url, timeout=(6.1, 27), **kwargs)
+    response = session.get(url, timeout=(6.1, 30), **kwargs)
     response.raise_for_status()
     return response
-
-
-_freq_words = None
 
 
 def get_freq_words():
     """Get wordlist of the top 3000 English words which longer than 3 letters."""
 
-    global _freq_words
-    if not _freq_words:
-        result = _request(
-            "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-        ).text
-        result = islice(
-            re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.M), 3000)
-        _freq_words = frozenset(map(str.lower, map(itemgetter(1), result)))
-    return _freq_words
+    result = _request(
+        "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+    ).text
+    result = islice(re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.M),
+                    3000)
+    return frozenset(map(str.lower, map(itemgetter(1), result)))
 
 
 def parse_config(configfile: str):
 
     parser = ConfigParser()
+    if parser.read(configfile):
+        config = parser["DEFAULT"]
+        config["output_file"] = op.expanduser(config["output_file"])
+        config["cache_dir"] = op.expanduser(config["cache_dir"])
+        config["mgs_json"] = op.expanduser(config["mgs_json"])
+        return config
+
     parser["DEFAULT"] = {
         "output_file":
             "regex.txt",
         "cache_dir":
             "cache",
+        "mgs_json":
+            "",
         "mteam_username":
             "",
         "mteam_password":
@@ -742,16 +751,8 @@ def parse_config(configfile: str):
         "mteam_non_av_page":
             "torrents.php",
     }
-
-    if parser.read(configfile):
-        config = parser["DEFAULT"]
-        config["output_file"] = op.expanduser(config["output_file"])
-        config["cache_dir"] = op.expanduser(config["cache_dir"])
-        return config
-
     with open(configfile, "w", encoding="utf-8") as f:
         parser.write(f)
-
     sys.exit(f"Please edit {configfile} before running me again.")
 
 
@@ -773,15 +774,15 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="test_match",
-        help="test regex with av torrents",
+        help="matching test with av torrents",
     )
     group.add_argument(
         "-m",
-        "--test-miss",
+        "--test-mis",
         dest="mode",
         action="store_const",
         const="test_miss",
-        help="test regex with non-av torrents",
+        help="mis-matching test with non-av torrents",
     )
     group.set_defaults(mode="build")
 
@@ -790,94 +791,61 @@ def parse_arguments():
         "--fetch",
         dest="fetch",
         action="store_true",
-        help="fetch info from web instead of using local cache",
+        help="fetch info from web instead of using local cache "
+        "(default: %(default)s)",
     )
     parser.add_argument(
-        "-l",
-        dest="limit",
+        "--pmax",
+        dest="prefix_max",
         action="store",
         type=int,
-        help="mteam page limit (default: %(default)s)",
+        default=3000,
+        help="maximum prefixes to use when building regex "
+        "(default: %(default)s)",
+    )
+    parser.add_argument(
+        "--kmax",
+        dest="keyword_max",
+        action="store",
+        type=int,
+        default=200,
+        help="maximum keywords to use when building regex "
+        "(default: %(default)s)",
+    )
+    parser.add_argument(
+        "--mtmax",
+        dest="mteam_max",
+        action="store",
+        type=int,
         default=500,
+        help="maximum mteam pages to scrape (default: %(default)s)",
     )
 
     args = parser.parse_args()
-
-    if args.limit <= 0:
-        parser.error("limit should be an integer greater than zero")
-
+    if args.mteam_max <= 0 or args.prefix_max <= 0:
+        parser.error(
+            "mteam_max and prefix_max should be an integer greater than zero")
     return args
 
 
-def _init_session(session_file: Path):
-
-    try:
-        with open(session_file, "rb") as f:
-            session = pickle.load(f)
-    except (OSError, pickle.PickleError):
-        pass
-    else:
-        if isinstance(session, requests.Session):
-            return session
-
-    session = requests.Session()
-    session.cookies.set_cookie(
-        requests.cookies.create_cookie(domain="www.javbus.com",
-                                       name="existmag",
-                                       value="all"))
-    session.headers.update({
-        "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) Gecko/20100101 Firefox/80.0"
-    })
-    adapter = requests.adapters.HTTPAdapter(max_retries=5)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
-
-
-def _save_session(session: requests.Session, session_file: Path):
-
-    try:
-        with open(session_file, "wb") as f:
-            pickle.dump(session, f)
-    except FileNotFoundError:
-        try:
-            session_file.parent.mkdir(parents=True)
-        except OSError:
-            pass
-        else:
-            _save_session(session, session_file)
-
-
-session = None
+session = _init_session()
 
 
 def main():
-
-    global session
 
     os.chdir(op.dirname(__file__))
 
     config = parse_config("builder.ini")
     args = parse_arguments()
 
-    session_file = Path("raw/cookies")
-    session = _init_session(session_file)
-
-    mteam = MTeamScraper(
-        limit=args.limit,
-        av_page=config["mteam_av_page"],
-        non_av_page=config["mteam_non_av_page"],
-        username=config["mteam_username"],
-        password=config["mteam_password"],
-        cache_dir=config["cache_dir"],
-    )
-
     if args.mode == "build":
         regex = Builder(
             output_file=config["output_file"],
-            mteam=mteam,
             fetch=args.fetch,
+            keyword_max=args.keyword_max,
+            prefix_max=args.prefix_max,
+            mgs_json=config["mgs_json"],
+            raw_dir="raw",
         ).build()
 
         if regex:
@@ -887,18 +855,24 @@ def main():
             print("Generating regex failed.", file=sys.stderr)
 
     else:
+        mteam = MTeamCollector(
+            max_pages=args.mteam_max,
+            av_page=config["mteam_av_page"],
+            non_av_page=config["mteam_non_av_page"],
+            username=config["mteam_username"],
+            password=config["mteam_password"],
+            cache_dir=config["cache_dir"],
+        )
         analyzer = Analyzer(
             regex_file=config["output_file"],
             mteam=mteam,
             fetch=args.fetch,
+            report_dir="report",
         )
-
         if args.mode == "test_match":
             analyzer.analyze_av()
         else:
             analyzer.analyze_non_av()
-
-    _save_session(session, session_file)
 
 
 if __name__ == "__main__":
