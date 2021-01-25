@@ -211,19 +211,27 @@ class Builder:
 
         try:
             with open(self._jsonfile, "r", encoding="utf-8") as f:
-                self._json_old = json.load(f)
+                json_read = json.load(f)
         except (OSError, ValueError):
-            self._json_old = None
+            json_read = None
         self._json_new = {}
 
-        keyword = self.keyword = self._build_regex("keyword", True)
-        prefix = self._build_regex("prefix", False)
+        keyword = self.keyword = self._build_regex(
+            name="keyword",
+            json_read=json_read,
+            omitOuterParen=True,
+        )
+        prefix = self._build_regex(
+            name="prefix",
+            json_read=json_read,
+            omitOuterParen=False,
+        )
 
         print("-" * 50)
         if not (keyword and prefix):
             return
 
-        if self._json_old != self._json_new:
+        if json_read != self._json_new:
             with open(self._jsonfile, "w", encoding="utf-8") as f:
                 json.dump(self._json_new, f, indent=4)
 
@@ -231,7 +239,8 @@ class Builder:
         self._update_file(self._output_file, regex)
         return regex
 
-    def _build_regex(self, name: str, omitOuterParen: bool) -> str:
+    def _build_regex(self, name: str, json_read: Dict[str, Dict],
+                     omitOuterParen: bool) -> str:
 
         print(f" {name.upper()} ".center(50, "-"))
 
@@ -240,7 +249,7 @@ class Builder:
             try:
                 result = {
                     i: v
-                    for k, v in self._json_old[name].items()
+                    for k, v in json_read[name].items()
                     if (i := k.strip().lower()) and v > 0
                 }
             except (TypeError, KeyError, AttributeError):
@@ -716,7 +725,8 @@ def _request(url: str, **kwargs):
 
 
 def get_freq_words():
-    """Get wordlist of the top 3000 English words which longer than 3 letters."""
+    """Get wordlist of the top 3000 English words which is longer than 3
+    letters."""
 
     result = _request(
         "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
