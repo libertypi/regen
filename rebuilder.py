@@ -340,26 +340,27 @@ class Builder:
         return result
 
     @staticmethod
-    def _update_file(file: Path, content: str = None) -> Iterable[str]:
+    def _update_file(file: Path, content: str = None) -> List[str]:
 
-        new_list = () if content is None else (content,)
+        new = [] if content is None else [content]
         try:
             with open(file, "r+", encoding="utf-8") as f:
-                old_list = f.read().splitlines()
-                if not new_list:
-                    new_list = filter(None, map(str.strip, old_list))
-                    new_list = sorted(set(map(str.lower, new_list)))
-                if old_list != new_list:
+                old = f.read().splitlines()
+                if not new:
+                    new.extend(
+                        set(map(str.lower, filter(None, map(str.strip, old)))))
+                    new.sort()
+                if old != new:
                     f.seek(0)
-                    f.writelines(i + "\n" for i in new_list)
+                    f.writelines(i + "\n" for i in new)
                     f.truncate()
                     print(f"Update: {file}")
         except FileNotFoundError:
             file.parent.mkdir(parents=True, exist_ok=True)
             with open(file, mode="w", encoding="utf-8") as f:
-                f.writelines(i + "\n" for i in new_list)
+                f.writelines(i + "\n" for i in new)
             print(f"Create: {file}")
-        return new_list
+        return new
 
 
 class MTeamCollector:
