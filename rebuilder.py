@@ -300,8 +300,8 @@ class Builder:
 
     def _fetch_keyword(self) -> Dict[str, int]:
 
-        result = {}
-        setdefault = result.setdefault
+        d = {}
+        setdefault = d.setdefault
         freq = get_freq_words()
 
         for s in self._scrapers:
@@ -309,20 +309,20 @@ class Builder:
                 continue
             for k, v in s.get_keyword():
                 if k not in freq and setdefault(k, v) < v:
-                    result[k] = v
+                    d[k] = v
 
-        return self._sort_dict_by_val(result)
+        return self._sort_dict_by_val(d)
 
     def _fetch_prefix(self) -> Dict[str, int]:
 
-        result = defaultdict(set)
+        d = defaultdict(set)
         reg = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
 
         for s in self._scrapers:
             for m in filter(None, map(reg, map(str.lower, s.get_id()))):
-                result[m[1]].add(int(m[2]))
+                d[m[1]].add(int(m[2]))
 
-        return self._sort_dict_by_val((k, len(v)) for k, v in result.items())
+        return self._sort_dict_by_val((k, len(v)) for k, v in d.items())
 
     @staticmethod
     def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]], reverse=True):
