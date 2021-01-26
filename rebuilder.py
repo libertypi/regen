@@ -326,6 +326,7 @@ class Builder:
 
     @staticmethod
     def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]], reverse=True):
+
         if isinstance(d, dict):
             d = d.items()
         return dict(sorted(d, key=itemgetter(1), reverse=reverse))
@@ -432,7 +433,6 @@ class MTeamCollector:
                         pool.append(
                             ex.submit(self._dl_torrent,
                                       urljoin(self.DOMAIN, link), path))
-
             if pool:
                 yield from filter(
                     None, map(methodcaller("result"), cf.as_completed(pool)))
@@ -663,21 +663,23 @@ class Analyzer:
     def _match_non_av(self, path: str) -> Tuple[str]:
 
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(
-                match["m"]
-                for match in map(self._matcher, filter(self._filter, f))
-                if match)
+            return tuple(m["m"]
+                         for m in map(self._matcher, filter(self._filter, f))
+                         if m)
 
     @staticmethod
     def _get_brief(name: str, total: int, n: int):
+
         return f"Total: {total}. {name}: {n}. Percentage: {n / total:.2%}."
 
     @staticmethod
     def _format_report(result: Iterable):
+
+        r = reprlib.repr
         yield "{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format(
             "uniq", "occur", "word", "strings", "")
         for i, j, k, s in result:
-            yield f"{i:6d}  {j:6d}  {k:15}  {reprlib.repr(s)[1:-1]}\n"
+            yield f"{i:6d}  {j:6d}  {k:15}  {r(s)[1:-1]}\n"
 
 
 def _init_session():
@@ -723,13 +725,6 @@ def get_freq_words():
 def parse_config(configfile: str):
 
     parser = ConfigParser()
-    if parser.read(configfile):
-        config = parser["DEFAULT"]
-        config["output_file"] = op.expanduser(config["output_file"])
-        config["cache_dir"] = op.expanduser(config["cache_dir"])
-        config["mgs_json"] = op.expanduser(config["mgs_json"])
-        return config
-
     parser["DEFAULT"] = {
         "output_file":
             "regex.txt",
@@ -746,6 +741,14 @@ def parse_config(configfile: str):
         "mteam_non_av_page":
             "torrents.php",
     }
+
+    if parser.read(configfile):
+        config = parser["DEFAULT"]
+        config["output_file"] = op.expanduser(config["output_file"])
+        config["cache_dir"] = op.expanduser(config["cache_dir"])
+        config["mgs_json"] = op.expanduser(config["mgs_json"])
+        return config
+
     with open(configfile, "w", encoding="utf-8") as f:
         parser.write(f)
     sys.exit(f"Please edit {configfile} before running me again.")
