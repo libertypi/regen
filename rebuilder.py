@@ -12,7 +12,7 @@ import sys
 from collections import Counter, defaultdict
 from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, repeat, tee
-from operator import itemgetter, methodcaller
+from operator import itemgetter
 from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
@@ -285,9 +285,8 @@ class Builder:
         length = len(regex)
         diff = length - len(concat)
         if diff > 0:
-            print(
-                f"Computed regex is {diff} characters longer than concatenation, use the latter."
-            )
+            print(f"Computed regex is {diff} characters "
+                  "longer than concatenation, use the latter.")
             regex = concat
         else:
             regen.raise_for_verify()
@@ -388,7 +387,7 @@ class MTeamCollector:
     def from_web(self, is_av: bool) -> Iterator[str]:
 
         url = self._pages[is_av]
-        cache_dir = self._cache_dirs[is_av]
+        cache = self._cache_dirs[is_av]
 
         matcher = re.compile(r"\bid=([0-9]+)").search
         xpath = XPath(
@@ -396,42 +395,51 @@ class MTeamCollector:
             '/descendant::a[contains(@href, "download.php?")][1]/@href',
             smart_strings=False)
 
-        pool = []
-        idx = 0
         join = op.join
         exists = op.exists
-        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._page_max)
+        pool = {}
+        idx = 0
+        total = self._page_max
+        step = frozenset(range(1, total, total // 10))
 
-        print(f"Scanning mteam ({self._page_max} pages)...", end="", flush=True)
+        print(f"Scanning mteam ({total} pages)...", end="", flush=True)
         self._login()
 
         with cf.ThreadPoolExecutor() as ex:
 
             for ft in cf.as_completed(
                     ex.submit(_request, url, params={"page": i})
-                    for i in range(1, self._page_max + 1)):
+                    for i in range(1, total + 1)):
 
                 idx += 1
-                if not idx % step:
-                    if idx <= self._page_max - step:
-                        print(f"{idx}..", end="", flush=True)
-                    else:
-                        print(f"{idx}..{self._page_max}")
+                if idx in step:
+                    print(f"{idx}..", end="", flush=True)
 
                 for link in xpath(html_fromstring(ft.result().content)):
                     try:
-                        path = join(cache_dir, matcher(link)[1] + ".txt")
+                        path = join(cache, matcher(link)[1] + ".txt")
                     except TypeError:
                         continue
                     if exists(path):
                         yield path
                     else:
-                        pool.append(
-                            ex.submit(self._dl_torrent,
-                                      urljoin(self.DOMAIN, link), path))
-            if pool:
-                yield from filter(
-                    None, map(methodcaller("result"), cf.as_completed(pool)))
+                        url = urljoin(self.DOMAIN, link)
+                        pool[ex.submit(_request, url)] = url, path
+            print(total)
+
+            for ft in cf.as_completed(pool):
+                url, path = pool[ft]
+                print(f"Downloading: {url}")
+                try:
+                    yield self._parse_torrent(ft.result().content, path)
+                except requests.RequestException as e:
+                    print(e, file=sys.stderr)
+                except Exception as e:
+                    print(e, file=sys.stderr)
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
 
     def _login(self):
 
@@ -451,61 +459,55 @@ class MTeamCollector:
             sys.exit(f"login failed: {e}")
         self._logined = True
 
-    def _dl_torrent(self, link: str, path: str):
+    def _parse_torrent(self, content: bytes, path: str):
+        """Parse a torrent, write file list to file and return the path."""
 
-        print("Downloading:", link)
         try:
-            content = _request(link).content
-            try:
-                files = Torrent.from_string(content).files
-                with open(path, "w", encoding="utf-8") as f:
-                    f.writelines(i[0].lower() + "\n" for i in files)
-
-            except Exception:
-                if self._has_transmission is None:
-                    try:
-                        subprocess.run("transmission-show", capture_output=True)
-                        self._has_transmission = True
-                    except FileNotFoundError:
-                        print(
-                            "transmission-show not found. It is recommended to "
-                            "install transmission-show to handle more torrents.\n"
-                            "In Ubuntu, try: 'sudo apt install transmission-cli'",
-                            file=sys.stderr)
-                        self._has_transmission = False
-                if not self._has_transmission:
-                    raise
-
-                torrent_file = path + ".torrent"
-                try:
-                    with open(torrent_file, "wb") as f:
-                        f.write(content)
-                    files = subprocess.run(
-                        ("transmission-show", torrent_file),
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                    ).stdout
-                finally:
-                    try:
-                        os.unlink(torrent_file)
-                    except OSError:
-                        pass
-
-                spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
-                files = spliter.findall(files, files.index("\n\nFILES\n\n"))
-                if files:
-                    with open(path, "w", encoding="utf-8") as f:
-                        f.writelines(i.lower() + "\n" for i in files)
-
+            files = Torrent.from_string(content).files
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(i[0].lower() + "\n" for i in files)
+        except OSError:
+            raise
         except Exception as e:
-            print(f'Error: "{link}": {e}', file=sys.stderr)
+            if not self._has_transmission:
+                if self._has_transmission is False:
+                    raise e
+                try:
+                    subprocess.run("transmission-show", capture_output=True)
+                    self._has_transmission = True
+                except FileNotFoundError:
+                    print(
+                        "transmission-show not found. It is recommended to "
+                        "install transmission-show to handle more torrents.\n"
+                        "In Ubuntu, try: 'sudo apt install transmission-cli'",
+                        file=sys.stderr)
+                    self._has_transmission = False
+                    raise e
+
+            torrent_file = path + ".torrent"
             try:
-                os.unlink(path)
-            except OSError:
-                pass
-        else:
-            return path
+                with open(torrent_file, "wb") as f:
+                    f.write(content)
+                files = subprocess.run(
+                    ("transmission-show", torrent_file),
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout
+            finally:
+                try:
+                    os.unlink(torrent_file)
+                except OSError:
+                    pass
+
+            spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
+            files = spliter.findall(files, files.index("\n\nFILES\n\n"))
+            if not files:
+                raise ValueError("torrent file seems empty")
+            with open(path, "w", encoding="utf-8") as f:
+                f.writelines(i.lower() + "\n" for i in files)
+
+        return path
 
 
 class Analyzer:
@@ -517,16 +519,18 @@ class Analyzer:
             with open(regex_file, "r", encoding="utf-8") as f:
                 regex = f.readline().strip()
                 if f.read():
-                    raise ValueError
-            i = regex.index("(", 1)
-        except FileNotFoundError:
-            sys.exit(f"{regex_file} not found")
-        except ValueError:
-            sys.exit("invalid regex file")
+                    raise ValueError("regex file should contain only one line")
 
-        a = regex[:i].replace("(", "(?:")
-        b = regex[i + 1:].replace("(", "(?:")
-        self._matcher = re.compile(f"{a}(?P<m>{b}", flags=re.M).search
+            if "(?" in regex:
+                raise ValueError("regex should not have special group")
+
+            i = regex.index("(", 1)
+            regex = "{}({}".format(regex[:i].replace("(", "(?:"),
+                                   regex[i + 1:].replace("(", "(?:"))
+            self._matcher = re.compile(regex, flags=re.M).search
+        except (OSError, ValueError) as e:
+            sys.exit(e)
+
         self._filter = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
@@ -539,20 +543,20 @@ class Analyzer:
 
         print("Matching test begins...")
 
+        total = unmatched = 0
         unmatch_raw = self._report_dir.joinpath("unmatch_raw.txt")
         unmatch_freq = self._report_dir.joinpath("unmatch_frequency.txt")
-        total = unmatched = 0
         sep = "-" * 80 + "\n"
+        groups = defaultdict(list)
+        prefix_count = Counter()
+        word_count = Counter()
+        tmp = set()
 
         prefix_finder = re.compile(
             r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:[hm]hb[0-9]{,2})?)\b.*$",
             flags=re.M).findall
         word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
 
-        groups = defaultdict(list)
-        prefix_count = Counter()
-        word_count = Counter()
-        tmp = set()
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=True)
 
@@ -585,21 +589,20 @@ class Analyzer:
         prefixes = [(i, len(v), k, set(v))
                     for k, v in groups.items()
                     if (i := prefix_count[k]) >= 5 and k not in freq_words]
-        prefixes.sort(reverse=True)
+        prefixes.sort(key=lambda t: (-t[0], -t[1], t[2]))
 
         words = [(v, k)
                  for k, v in word_count.items()
                  if v >= 5 and k not in freq_words]
-        words.sort(reverse=True)
+        words.sort(key=lambda t: (-t[0], t[1]))
 
         with open(unmatch_freq, "w", encoding="utf-8") as f:
             f.write(brief)
-            f.write("\n\n")
 
-            f.write("Potential ID Prefixes:\n\n")
+            f.write("\n\nPotential ID Prefixes:\n")
             f.writelines(self._format_report(prefixes))
 
-            f.write("\n\nPotential Keywords:\n\n")
+            f.write("\n\nPotential Keywords:\n")
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
@@ -609,9 +612,9 @@ class Analyzer:
 
         print("Mismatching test begins...")
 
+        total = mismatched = 0
         mismatched_file = self._report_dir.joinpath("mismatch_frequency.txt")
         word_searcher = re.compile(r"[a-z]+").search
-        total = mismatched = 0
 
         groups = defaultdict(list)
         word_count = Counter()
@@ -641,7 +644,7 @@ class Analyzer:
         print(brief)
 
         result = [(word_count[k], len(v), k, set(v)) for k, v in groups.items()]
-        result.sort(reverse=True)
+        result.sort(key=lambda t: (-t[0], -t[1], t[2]))
 
         with open(mismatched_file, "w", encoding="utf-8") as f:
             f.write(brief)
@@ -660,9 +663,8 @@ class Analyzer:
     def _match_nonav(self, path: str) -> Tuple[str]:
 
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(m["m"]
-                         for m in map(self._matcher, filter(self._filter, f))
-                         if m)
+            return tuple(
+                m[1] for m in map(self._matcher, filter(self._filter, f)) if m)
 
     @staticmethod
     def _get_brief(name: str, total: int, n: int):
@@ -672,7 +674,7 @@ class Analyzer:
     def _format_report(result: Iterable):
         r = reprlib.repr
         yield "{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format(
-            "uniq", "occur", "word", "strings", "")
+            "item", "occur", "word", "strings", "")
         for i, j, k, s in result:
             yield f"{i:6d}  {j:6d}  {k:15}  {r(s)[1:-1]}\n"
 
@@ -691,7 +693,7 @@ def _init_session():
     adapter = requests.adapters.HTTPAdapter(
         max_retries=Retry(total=5,
                           status_forcelist=frozenset((500, 502, 503, 504)),
-                          backoff_factor=0.1))
+                          backoff_factor=0.3))
     session.mount("http://", adapter)
     session.mount("https://", adapter)
     return session
@@ -792,7 +794,7 @@ def parse_arguments():
         dest="file",
         action="store",
         help=
-        "the file to save or read regex from, override 'regex_file' in config",
+        "the file for saving or reading regex, override 'regex_file' config",
     )
     parser.add_argument(
         "--pmax",
@@ -824,9 +826,6 @@ def parse_arguments():
         parser.error(
             "mteam_max and prefix_max should be an integer greater than zero")
     return args
-
-
-session = _init_session()
 
 
 def main():
@@ -875,6 +874,8 @@ def main():
         else:
             analyzer.analyze_non_av(args.local)
 
+
+session = _init_session()
 
 if __name__ == "__main__":
     main()
