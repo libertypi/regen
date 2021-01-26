@@ -36,12 +36,6 @@ class Scraper:
     def get_tree(self, url: str, page: int) -> HtmlElement:
         raise NotImplementedError
 
-    def get_id(self) -> Iterable[str]:
-        raise NotImplementedError
-
-    def get_keyword(self) -> Iterable[Tuple[str, int]]:
-        raise NotImplementedError
-
     def _scrape(self, base: str, paths: Tuple[str], xpath: Union[XPath, str],
                 step: int) -> Iterator[str]:
 
