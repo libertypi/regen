@@ -11,14 +11,15 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 from configparser import ConfigParser
-from itertools import chain, filterfalse, islice, tee
+from itertools import chain, filterfalse, islice, repeat, tee
 from operator import itemgetter, methodcaller
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
 
 import requests
 from lxml.etree import XPath
+from lxml.html import HtmlElement
 from lxml.html import fromstring as html_fromstring
 from torrentool.api import Torrent
 from urllib3 import Retry
@@ -32,270 +33,262 @@ class LastPageReached(Exception):
 
 class Scraper:
 
-    @classmethod
-    def get_id(cls) -> Iterator[Tuple[str, str]]:
+    def get_tree(self, url: str, page: int) -> HtmlElement:
+        raise NotImplementedError
 
-        matcher = re.compile(
-            r"\s*([a-z]{3,8})[_-]?0*([1-9][0-9]{,5})\s*").fullmatch
+    def get_id(self) -> Iterable[str]:
+        raise NotImplementedError
 
-        return map(itemgetter(1, 2),
-                   filter(None, map(matcher, map(str.lower, cls._get_id()))))
+    def get_keyword(self) -> Iterable[Tuple[str, int]]:
+        raise NotImplementedError
 
-    @staticmethod
-    def _get_id():
-        pass
-
-    @staticmethod
-    def get_keyword() -> Iterable[Tuple[str, int]]:
-        pass
-
-    @classmethod
-    def _scrape(cls, base: str, paths: tuple, xpath: XPath,
+    def _scrape(self, base: str, paths: Tuple[str], xpath: Union[XPath, str],
                 step: int) -> Iterator[str]:
 
         print(f"Scanning {urlsplit(base).netloc}")
+        if isinstance(xpath, str):
+            xpath = XPath(xpath, smart_strings=False)
 
         with cf.ThreadPoolExecutor() as ex:
             for path in paths:
-                print(f"  /{path}: ", end="", flush=True)
+                print(f"  {path}: ", end="", flush=True)
                 lo = 1
-                download = cls._get_downloader(base + path, xpath)
+                path = repeat(base + path)
 
                 while True:
                     print(f"{lo}..", end="", flush=True)
                     hi = lo + step
+                    result = ex.map(self.get_tree, path, range(lo, hi))
                     try:
-                        yield from chain.from_iterable(
-                            ex.map(download, range(lo, hi)))
+                        yield from chain.from_iterable(map(xpath, result))
                     except LastPageReached as e:
                         print(e)
                         break
                     lo = hi
 
-    @staticmethod
-    def _get_downloader(base: str, xpath: XPath):
-        pass
-
 
 class JavBusScraper(Scraper):
 
-    @classmethod
-    def _get_id(cls) -> Iterator[str]:
+    def __init__(self) -> None:
 
-        return cls._scrape(
-            base="https://www.javbus.com/",
-            paths=("page", "uncensored/page", "genre/hd",
-                   "uncensored/genre/hd"),
-            xpath=None,
+        self.xpath = XPath(
+            './/div[@id="waterfall"]//a[@class="movie-box"]'
+            '//span/date[1]/text()',
+            smart_strings=False)
+
+    @staticmethod
+    def get_tree(url: str, page: int):
+
+        try:
+            return html_fromstring(_request(f"{url}/{page}").content)
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                raise LastPageReached(page)
+            raise
+
+    def get_id(self):
+
+        return self._scrape(
+            base="https://www.javbus.com",
+            paths=("/page", "/uncensored/page", "/genre/hd",
+                   "/uncensored/genre/hd"),
+            xpath=self.xpath,
             step=500,
         )
 
-    @classmethod
-    def get_keyword(cls):
+    def get_keyword(self):
 
-        result = cls._scrape(
-            base="https://www.javbus.org/",
-            paths=("page", *(f"studio/{i}" for i in range(1, 5))),
-            xpath=None,
+        result = self._scrape(
+            base="https://www.javbus.org",
+            paths=("/page", *(f"/studio/{i}" for i in range(1, 5))),
+            xpath=self.xpath,
             step=500,
         )
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         return Counter(m[1].lower() for m in map(matcher, result) if m).items()
 
-    xpath = None
-
-    @classmethod
-    def _get_downloader(cls, base: str, xpath: XPath):
-
-        xpath = cls.xpath
-        if xpath is None:
-            xpath = cls.xpath = XPath(
-                './/div[@id="waterfall"]//a[@class="movie-box"]'
-                '//span/date[1]/text()',
-                smart_strings=False)
-
-        def download(page: int):
-            try:
-                return xpath(html_fromstring(
-                    _request(f"{base}/{page}").content))
-            except requests.HTTPError as e:
-                if e.response.status_code == 404:
-                    raise LastPageReached(page)
-                raise
-
-        return download
-
 
 class JavDBScraper(Scraper):
 
-    @classmethod
-    def _get_id(cls) -> Iterator[str]:
+    DOMAIN = "https://javdb.com"
 
-        return cls._scrape(
-            base="https://javdb.com/",
-            paths=("uncensored", ""),
-            xpath=XPath(
-                './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
-                smart_strings=False),
+    def __init__(self) -> None:
+
+        self.nav_xp = XPath(
+            '//section/div[@class="container"]//ul[@class="pagination-list"]/li'
+            '/a[contains(@class, "is-current") and normalize-space()=$page]')
+
+    def get_tree(self, url: str, page: int):
+
+        tree = html_fromstring(_request(f"{url}?page={page}").content)
+        if self.nav_xp(tree, page=page):
+            return tree
+        raise LastPageReached(page)
+
+    def get_id(self) -> Iterator[str]:
+
+        return self._scrape(
+            base=self.DOMAIN,
+            paths=("/uncensored", "/"),
+            xpath=('.//div[@id="videos"]//a[@class="box"]'
+                   '/div[@class="uid"]/text()'),
             step=100,
         )
 
-    @classmethod
-    def get_keyword(cls) -> Iterable[Tuple[str, int]]:
+    def get_keyword(self) -> Iterable[Tuple[str, int]]:
 
-        result = cls._scrape(
-            base="https://javdb.com/",
-            paths=("series/western",),
-            xpath=XPath('//div[@id="series"]//div[@class="box"]'
-                        '/a[@title and strong and span]'),
+        result = self._scrape(
+            base=self.DOMAIN,
+            paths=("/series/western",),
+            xpath=('//div[@id="series"]//div[@class="box"]'
+                   '/a[@title and strong and span]'),
             step=100,
         )
-        title_matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
-        freq_matcher = re.compile(r"\d+").search
+        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
+        searcher = re.compile(r"\d+").search
 
         for t in result:
             title = t.findtext("strong").replace(" ", "").lower()
-            if title_matcher(title):
+            if matcher(title):
                 try:
-                    yield title, int(freq_matcher(t.findtext("span"))[0])
+                    yield title, int(searcher(t.findtext("span"))[0])
                 except TypeError:
                     pass
 
-    nav_xp = None
 
-    @classmethod
-    def _get_downloader(cls, base: str, xpath: XPath):
-
-        nav_xp = cls.nav_xp
-        if nav_xp is None:
-            nav_xp = cls.nav_xp = XPath(
-                '//section/div[@class="container"]'
-                '//ul[@class="pagination-list"]/li'
-                '/a[contains(@class, "is-current") and normalize-space()=$page]'
-            )
-
-        def download(page: int):
-            tree = html_fromstring(_request(f"{base}?page={page}").content)
-            if nav_xp(tree, page=page):
-                return xpath(tree)
-            raise LastPageReached(page)
-
-        return download
-
-
-class GithubScraper(Scraper):
+class GithubScraper:
 
     @staticmethod
-    def _get_id() -> List[str]:
+    def get_id() -> List[str]:
 
-        print("Downloading github database...")
+        print("Downloading GitHub database...")
         return _request(
             "https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"
         ).json()
 
 
+class MGSLoader:
+
+    def __init__(self, json_file: str) -> None:
+        self.json_file = Path(json_file)
+
+    def get_id(self) -> List[str]:
+
+        print("Loading MGStage data...")
+        try:
+            with open(self.json_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError) as e:
+            print(e, file=sys.stderr)
+            return ()
+
+
 class Builder:
 
-    def __init__(self, *, output_file: str, fetch: bool, keyword_max: int,
-                 prefix_max: int, mgs_json: str, raw_dir: str) -> None:
+    def __init__(self, *, output_file: str, keyword_max: int, prefix_max: int,
+                 mgs_json: str, raw_dir: str) -> None:
 
         self._output_file = Path(output_file)
-        self._mgs_json = Path(mgs_json) if mgs_json else None
         self._raw_dir = Path(raw_dir)
         self._jsonfile = self._raw_dir.joinpath("data.json")
-        self._fetch = fetch
         self._keyword_max = keyword_max
         self._prefix_max = prefix_max
+        self._mgs_json = mgs_json
+        self._scrapers = None
 
-    def build(self):
+    def from_web(self):
+
+        if not self._scrapers:
+            self._scrapers = [JavBusScraper(), JavDBScraper(), GithubScraper]
+            if self._mgs_json:
+                self._scrapers.append(MGSLoader(self._mgs_json))
+
+        data = {
+            "keyword": self._fetch_keyword(),
+            "prefix": self._fetch_prefix()
+        }
+        with open(self._jsonfile, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+
+        return self._build(data)
+
+    def from_cache(self):
 
         try:
             with open(self._jsonfile, "r", encoding="utf-8") as f:
-                self._json_read = json.load(f)
-        except (FileNotFoundError, ValueError):
-            self._json_read = None
-        self._json_new = {}
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            sys.exit(e)
 
-        keyword = self.keyword = self._build_regex(
+        return self._build(data)
+
+    def _build(self, data: Dict[str, dict]):
+
+        keyword = self._build_regex(
             name="keyword",
+            data=data,
             omitOuterParen=True,
         )
         prefix = self._build_regex(
             name="prefix",
+            data=data,
             omitOuterParen=False,
+            regex_filter=keyword,
         )
 
         print("-" * 50)
         if not (keyword and prefix):
             return
 
-        if self._json_read != self._json_new:
-            with open(self._jsonfile, "w", encoding="utf-8") as f:
-                json.dump(self._json_new, f, indent=4)
-
         regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
         self._update_file(self._output_file, regex)
         return regex
 
-    def _build_regex(self, name: str, omitOuterParen: bool) -> str:
+    def _build_regex(self,
+                     name: str,
+                     data: Dict[str, dict],
+                     omitOuterParen: bool,
+                     regex_filter: str = None) -> str:
 
         print(f" {name.upper()} ".center(50, "-"))
+        data = data[name]
+        print(f"Total: {sum(data.values())}, unique: {len(data)}")
 
-        result = None
-        if not self._fetch:
-            try:
-                result = {
-                    i: v
-                    for k, v in self._json_read[name].items()
-                    if (i := k.strip().lower()) and v > 0
-                }
-            except (TypeError, KeyError, AttributeError):
-                pass
-
-        if not result:
-            result = getattr(self, f"_fetch_{name}")()
-
-        print(f"Total: {sum(result.values())}, unique: {len(result)}")
-
-        result = sorted(result.items(), key=itemgetter(1), reverse=True)
-        self._json_new[name] = dict(result)
-
-        limit = getattr(self, f"_{name}_max")
-        if 0 < limit < len(result):
-            i = result[limit][1]
-            for limit in range(limit + 1, len(result)):
-                j = result[limit][1]
-                if j < i:
+        words = sorted(data, key=data.get, reverse=True)
+        i = getattr(self, f"_{name}_max")
+        if 0 < i < len(words):
+            thresh = data[words[i]]
+            for i in range(i + 1, len(words)):
+                if data[words[i]] < thresh:
+                    words = words[:i]
                     break
-                i = j
-            result = result[:limit]
 
-        print("Chosen: {} (frequency: {})".format(
-            len(result), result[-1][1] if result else None))
+        print("Cut: {} (frequency: {})".format(
+            len(words), data[words[-1]] if words else None))
 
         whitelist = self._update_file(
             self._raw_dir.joinpath(f"{name}_whitelist.txt"))
         blacklist = self._update_file(
             self._raw_dir.joinpath(f"{name}_blacklist.txt"))
 
-        if name != "keyword" and self.keyword:
-            regex = chain(whitelist, blacklist, (self.keyword,))
+        if regex_filter:
+            regex = chain(whitelist, blacklist, (regex_filter,))
         else:
             regex = chain(whitelist, blacklist)
         regex = re.compile("|".join(regex)).fullmatch
-        result = set(filterfalse(regex, map(itemgetter(0), result)))
+        words = set(filterfalse(regex, words))
 
-        result.update(whitelist)
-        result.difference_update(blacklist)
-        result = sorted(result)
+        words.update(whitelist)
+        words.difference_update(blacklist)
+        words = sorted(words)
 
-        print(f"Final: {len(result)}")
+        print(f"Final: {len(words)}")
 
-        regen = Regen(result)
+        regen = Regen(words)
         regex = regen.to_regex(omitOuterParen=omitOuterParen)
 
-        concat = "|".join(result)
-        if not omitOuterParen and len(result) > 1:
+        concat = "|".join(words)
+        if not omitOuterParen and len(words) > 1:
             concat = f"({concat})"
 
         length = len(regex)
@@ -311,39 +304,37 @@ class Builder:
 
         return regex
 
-    @staticmethod
-    def _fetch_keyword() -> Dict[str, int]:
+    def _fetch_keyword(self) -> Dict[str, int]:
 
         result = {}
-        freq_words = get_freq_words()
-        for cls in JavBusScraper, JavDBScraper:
-            for keyword, freq in cls.get_keyword():
-                if (keyword not in freq_words and
-                        result.setdefault(keyword, freq) < freq):
-                    result[keyword] = freq
-        return result
+        setdefault = result.setdefault
+        freq = get_freq_words()
+
+        for s in self._scrapers:
+            if not hasattr(s, "get_keyword"):
+                continue
+            for k, v in s.get_keyword():
+                if k not in freq and setdefault(k, v) < v:
+                    result[k] = v
+
+        return self._sort_dict_by_val(result)
 
     def _fetch_prefix(self) -> Dict[str, int]:
 
-        result = set()
-        for cls in JavBusScraper, JavDBScraper, GithubScraper:
-            result.update(cls.get_id())
+        result = defaultdict(set)
+        reg = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
 
-        result = Counter(map(itemgetter(0), result))
-        try:
-            with open(self._mgs_json) as f:
-                json_data = json.load(f)
-        except TypeError:
-            pass
-        except (FileNotFoundError, ValueError) as e:
-            print(e, file=sys.stderr)
-        else:
-            for d in json_data:
-                k = d["pre"]
-                v = d["freq"]
-                if len(k) > 2 and result[k] < v:
-                    result[k] = v
-        return result
+        for s in self._scrapers:
+            for m in filter(None, map(reg, map(str.lower, s.get_id()))):
+                result[m[1]].add(int(m[2]))
+
+        return self._sort_dict_by_val((k, len(v)) for k, v in result.items())
+
+    @staticmethod
+    def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]], reverse=True):
+        if isinstance(d, dict):
+            d = d.items()
+        return dict(sorted(d, key=itemgetter(1), reverse=reverse))
 
     @staticmethod
     def _update_file(file: Path, content: str = None) -> List[str]:
@@ -373,7 +364,7 @@ class MTeamCollector:
 
     DOMAIN = "https://pt.m-team.cc/"
 
-    def __init__(self, max_pages: int, av_page: str, non_av_page: str,
+    def __init__(self, page_max: int, av_page: str, non_av_page: str,
                  username: str, password: str, cache_dir: str) -> None:
 
         cache_dir = op.normpath(cache_dir)
@@ -385,7 +376,7 @@ class MTeamCollector:
             urljoin(self.DOMAIN, non_av_page),
             urljoin(self.DOMAIN, av_page),
         )
-        self._max_pages = max_pages
+        self._page_max = page_max
         self._account = {"username": username, "password": password}
         self._logined = False
 
@@ -416,27 +407,25 @@ class MTeamCollector:
             '//form[@id="form_torrent"]//table[@class="torrentname"]'
             '/descendant::a[contains(@href, "download.php?")][1]/@href',
             smart_strings=False)
-        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._max_pages)
+        step = min((os.cpu_count() + 4) * 3, 32 * 3, self._page_max)
         join = op.join
         exists = op.exists
 
-        print(f"Scanning mteam ({self._max_pages} pages)...",
-              end="",
-              flush=True)
+        print(f"Scanning mteam ({self._page_max} pages)...", end="", flush=True)
         self._login()
 
         with cf.ThreadPoolExecutor(max_workers=None) as ex:
 
             for ft in cf.as_completed(
                     ex.submit(_request, url, params={"page": i})
-                    for i in range(1, self._max_pages + 1)):
+                    for i in range(1, self._page_max + 1)):
 
                 idx += 1
                 if not idx % step:
-                    if idx <= self._max_pages - step:
+                    if idx <= self._page_max - step:
                         print(f"{idx}..", end="", flush=True)
                     else:
-                        print(f"{idx}..{self._max_pages}")
+                        print(f"{idx}..{self._page_max}")
 
                 for link in xpath(html_fromstring(ft.result().content)):
                     try:
@@ -731,8 +720,9 @@ def get_freq_words():
     result = _request(
         "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
     ).text
-    result = islice(re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.M),
-                    3000)
+    result = islice(
+        re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.MULTILINE),
+        3000)
     return frozenset(map(str.lower, map(itemgetter(1), result)))
 
 
@@ -850,14 +840,15 @@ def main():
     args = parse_arguments()
 
     if args.mode == "build":
-        regex = Builder(
+
+        builder = Builder(
             output_file=config["output_file"],
-            fetch=args.fetch,
             keyword_max=args.keyword_max,
             prefix_max=args.prefix_max,
             mgs_json=config["mgs_json"],
             raw_dir="raw",
-        ).build()
+        )
+        regex = builder.from_web() if args.fetch else builder.from_cache()
 
         if regex:
             print(f"\nResult ({len(regex)} chars):")
@@ -867,7 +858,7 @@ def main():
 
     else:
         mteam = MTeamCollector(
-            max_pages=args.mteam_max,
+            page_max=args.mteam_max,
             av_page=config["mteam_av_page"],
             non_av_page=config["mteam_non_av_page"],
             username=config["mteam_username"],
