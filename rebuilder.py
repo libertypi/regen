@@ -469,7 +469,8 @@ class MTeamCollector:
                     except FileNotFoundError:
                         print(
                             "transmission-show not found. It is recommended to "
-                            "install transmission-show to handle more torrents.",
+                            "install transmission-show to handle more torrents.\n"
+                            "In Ubuntu, try: 'sudo apt install transmission-cli'",
                             file=sys.stderr)
                         self._has_transmission = False
                 if not self._has_transmission:
