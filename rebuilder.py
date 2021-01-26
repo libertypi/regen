@@ -14,7 +14,7 @@ from configparser import ConfigParser
 from itertools import chain, filterfalse, islice, repeat, tee
 from operator import itemgetter, methodcaller
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union, Callable
+from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
 
 import requests
