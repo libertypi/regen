@@ -254,8 +254,8 @@ class Builder:
             thresh = data[words[i]]
             for i in range(i + 1, len(words)):
                 if data[words[i]] < thresh:
-                    words = words[:i]
                     break
+            words = words[:i]
 
         print("Cut: {} (frequency: {})".format(
             len(words), data[words[-1]] if words else None))
