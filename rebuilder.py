@@ -246,7 +246,7 @@ class Builder:
 
         print(f" {name.upper()} ".center(50, "-"))
         data = data[name]
-        print(f"Total: {sum(data.values())}, unique: {len(data)}")
+        print(f"Item: {sum(data.values())}, {name}: {len(data)}")
 
         words = sorted(data, key=data.get, reverse=True)
         i = getattr(self, f"_{name}_max")
@@ -312,13 +312,13 @@ class Builder:
     def _fetch_prefix(self) -> Dict[str, int]:
 
         d = defaultdict(set)
-        reg = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
+        r = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
 
         for s in self._scrapers:
-            for m in filter(None, map(reg, map(str.lower, s.get_id()))):
+            for m in filter(None, map(r, map(str.lower, s.get_id()))):
                 d[m[1]].add(int(m[2]))
 
-        return self._sort_dict_by_val((k, len(v)) for k, v in d.items())
+        return self._sort_dict_by_val(zip(d, map(len, d.values())))
 
     @staticmethod
     def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]]):
