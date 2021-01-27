@@ -322,7 +322,7 @@ class Builder:
 
     @staticmethod
     def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]]):
-        """Sort dictionary or 2-tuples iterable by key, largest first."""
+        """Sort dictionary or 2-tuple iterable by key, largest first."""
 
         d = sorted(d.items() if isinstance(d, dict) else d)
         d.sort(key=itemgetter(1), reverse=True)
