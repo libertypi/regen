@@ -246,7 +246,7 @@ class Builder:
 
         print(f" {name.upper()} ".center(50, "-"))
         data = data[name]
-        print(f"Item: {sum(data.values())}, {name}: {len(data)}")
+        print(f"Entry: {sum(data.values())}, {name}: {len(data)}")
 
         words = sorted(data, key=data.get, reverse=True)
         i = getattr(self, f"_{name}_max")
