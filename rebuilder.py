@@ -40,24 +40,24 @@ class Scraper:
     def _scrape(self, base: str, paths: Tuple[str], xpath: Union[XPath, str],
                 step: int) -> Iterator[str]:
 
-        print(f"Scanning {urlsplit(base).netloc}")
+        print(f"Scanning {urlsplit(base).netloc}", file=sys.stderr)
         if isinstance(xpath, str):
             xpath = XPath(xpath, smart_strings=False)
 
         with ThreadPoolExecutor() as ex:
             for path in paths:
-                print(f"  {path}: ", end="", flush=True)
+                print(f"  {path}: ", end="", flush=True, file=sys.stderr)
                 lo = 1
-                path = repeat(base + path)
+                path = repeat(urljoin(base, path))
 
                 while True:
-                    print(f"{lo}..", end="", flush=True)
+                    print(f"{lo}..", end="", flush=True, file=sys.stderr)
                     hi = lo + step
                     result = ex.map(self.get_tree, path, range(lo, hi))
                     try:
                         yield from chain.from_iterable(map(xpath, result))
                     except LastPageReached as e:
-                        print(e)
+                        print(e, file=sys.stderr)
                         break
                     lo = hi
 
@@ -165,7 +165,7 @@ class OnlineJsonScraper:
 
     def get_id(self) -> Iterable[str]:
 
-        print("Downloading online json...")
+        print("Downloading online json...", file=sys.stderr)
         for url in self.config:
             yield from _request(url).json()
 
@@ -177,7 +177,7 @@ class LocalJSONLoader:
 
     def get_id(self) -> List[str]:
 
-        print("Reading local json...")
+        print("Reading local json...", file=sys.stderr)
         for path in self.filelist:
             try:
                 with open(path, "r", encoding="utf-8") as f:
@@ -191,15 +191,14 @@ class LocalJSONLoader:
 class Builder:
 
     def __init__(self, scrapers: List[Scraper], regex_file: str,
-                 keyword_max: int, prefix_max: int,
-                 custom: Dict[str, List[str]]) -> None:
+                 keyword_max: int, prefix_max: int) -> None:
 
         self._scrapers = scrapers
         self._regex_file = Path(regex_file)
         self._datafile = Path("data.yaml")
         self._keyword_max = keyword_max
         self._prefix_max = prefix_max
-        self._custom = custom
+        self._custom = self._load_custom()
 
     def from_web(self):
 
@@ -209,7 +208,6 @@ class Builder:
         }
         with open(self._datafile, "w", encoding="utf-8") as f:
             yaml.dump(data, f, sort_keys=False, Dumper=yaml.CDumper)
-
         return self._build(data)
 
     def from_cache(self):
@@ -219,8 +217,29 @@ class Builder:
                 data = yaml.load(f, Loader=yaml.CLoader)
         except (OSError, ValueError) as e:
             sys.exit(e)
-
         return self._build(data)
+
+    def _load_custom(self) -> Dict[str, List[str]]:
+
+        try:
+            with open("custom.yaml", "r+", encoding="utf-8") as f:
+                a = yaml.load(f, Loader=yaml.CLoader)
+                b = dict(zip(a, map(self._sort_customlist, a.values())))
+                if a != b:
+                    a = b
+                    f.seek(0)
+                    yaml.dump(a, f, sort_keys=False, Dumper=yaml.CDumper)
+                    f.truncate()
+        except FileNotFoundError:
+            a = {
+                "keyword whitelist": [],
+                "keyword blacklist": [],
+                "prefix whitelist": [],
+                "prefix blacklist": [],
+            }
+            with open("custom.yaml", "w", encoding="utf-8") as f:
+                yaml.dump(a, f, sort_keys=False, Dumper=yaml.CDumper)
+        return a
 
     def _build(self, data: Dict[str, dict]):
 
@@ -236,7 +255,7 @@ class Builder:
             filterlist=(keyword,),
         )
 
-        print("-" * 50)
+        print("-" * 50, file=sys.stderr)
         if not (keyword and prefix):
             return
 
@@ -250,9 +269,10 @@ class Builder:
                      omitOuterParen: bool,
                      filterlist: Tuple[str] = ()) -> str:
 
-        print(f" {name.upper()} ".center(50, "-"))
+        print(f" {name.upper()} ".center(50, "-"), file=sys.stderr)
         data = data[name]
-        print(f"Entry: {sum(data.values())}, {name}: {len(data)}")
+        print(f"Entry: {sum(data.values())}, {name}: {len(data)}",
+              file=sys.stderr)
 
         words = sorted(data, key=data.get, reverse=True)
         lo = getattr(self, f"_{name}_max")
@@ -268,17 +288,18 @@ class Builder:
             words = words[:lo]
 
         print("Cut: {} (frequency: {})".format(
-            len(words), data[words[-1]] if words else None))
+            len(words), data[words[-1]] if words else None),
+              file=sys.stderr)
 
-        whitelist = self._custom[name + "_whitelist"]
-        blacklist = self._custom[name + "_blacklist"]
+        whitelist = self._custom.get(name + " whitelist", ())
+        blacklist = self._custom.get(name + " blacklist", ())
         regex = chain(whitelist, blacklist, filterlist)
         regex = re.compile("|".join(regex)).fullmatch
         words[:] = filterfalse(regex, words)
         words.extend(whitelist)
         words.sort()
 
-        print(f"Final: {len(words)}")
+        print(f"Final: {len(words)}", file=sys.stderr)
 
         regen = Regen(words)
         regex = regen.to_regex(omitOuterParen=omitOuterParen)
@@ -290,12 +311,14 @@ class Builder:
         length = len(regex)
         diff = length - len(concat)
         if diff > 0:
-            print(f"Computed regex is {diff} characters "
-                  "longer than concatenation, use the latter.")
+            print(
+                f"Computed regex is {diff} characters "
+                "longer than concatenation, use the latter.",
+                file=sys.stderr)
             regex = concat
         else:
             regen.raise_for_verify()
-            print(f"Regex length: {length} ({diff})")
+            print(f"Regex length: {length} ({diff})", file=sys.stderr)
 
         return regex
 
@@ -326,9 +349,12 @@ class Builder:
         return self._sort_dict_by_val(zip(d, map(len, d.values())))
 
     @staticmethod
+    def _sort_customlist(a: list):
+        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
+
+    @staticmethod
     def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]]):
         """Sort dictionary or 2-tuple iterable by key, largest first."""
-
         d = sorted(d.items() if isinstance(d, dict) else d)
         d.sort(key=itemgetter(1), reverse=True)
         return dict(d)
@@ -345,12 +371,12 @@ class Builder:
                     f.seek(0)
                     f.write(content)
                     f.truncate()
-                    print(f"Update: {file}")
+                    print(f"Update: {file}", file=sys.stderr)
         except FileNotFoundError:
             file.parent.mkdir(parents=True, exist_ok=True)
             with open(file, mode="w", encoding="utf-8") as f:
                 f.write(content)
-            print(f"Create: {file}")
+            print(f"Create: {file}", file=sys.stderr)
 
 
 class MTeamCollector:
@@ -403,7 +429,10 @@ class MTeamCollector:
         total = self._page_max
         step = frozenset(range(1, total, total // 10))
 
-        print(f"Scanning mteam ({total} pages)...", end="", flush=True)
+        print(f"Scanning mteam ({total} pages)...",
+              end="",
+              flush=True,
+              file=sys.stderr)
         self._login()
 
         with ThreadPoolExecutor() as ex:
@@ -414,7 +443,7 @@ class MTeamCollector:
 
                 idx += 1
                 if idx in step:
-                    print(f"{idx}..", end="", flush=True)
+                    print(f"{idx}..", end="", flush=True, file=sys.stderr)
 
                 for link in xpath(html_fromstring(ft.result().content)):
                     try:
@@ -426,11 +455,11 @@ class MTeamCollector:
                     else:
                         url = urljoin(self.DOMAIN, link)
                         pool[ex.submit(_request, url)] = url, path
-            print(total)
+            print(total, file=sys.stderr)
 
             for ft in as_completed(pool):
                 url, path = pool[ft]
-                print(f"Downloading: {url}")
+                print(f"Downloading: {url}", file=sys.stderr)
                 try:
                     self._parse_torrent(ft.result().content, path)
                 except requests.RequestException as e:
@@ -539,7 +568,7 @@ class Analyzer:
 
     def analyze_av(self, local: bool = False):
 
-        print("Matching test begins...")
+        print("Matching test begins...", file=sys.stderr)
 
         total = unmatched = 0
         report_file = "unmatch_report.txt"
@@ -582,7 +611,7 @@ class Analyzer:
 
         freq_words = get_freq_words()
         brief = self._get_brief("Match", total, total - unmatched)
-        print(brief)
+        print(brief, file=sys.stderr)
 
         prefixes = [(i, len(v), k, set(v))
                     for k, v in groups.items()
@@ -604,11 +633,11 @@ class Analyzer:
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
-        print(f"Result saved to: {report_file}")
+        print(f"Result saved to: {report_file}", file=sys.stderr)
 
     def analyze_non_av(self, local: bool = False):
 
-        print("Mismatching test begins...")
+        print("Mismatching test begins...", file=sys.stderr)
 
         total = mismatched = 0
         report_file = "mismatch_report.txt"
@@ -639,7 +668,7 @@ class Analyzer:
                     tmp.clear()
 
         brief = self._get_brief("Mismatch", total, mismatched)
-        print(brief)
+        print(brief, file=sys.stderr)
 
         result = [(word_count[k], len(v), k, set(v)) for k, v in groups.items()]
         result.sort(key=lambda t: (-t[0], -t[1], t[2]))
@@ -649,7 +678,7 @@ class Analyzer:
             f.write("\n\n")
             f.writelines(self._format_report(result))
 
-        print(f"Result saved to: {report_file}")
+        print(f"Result saved to: {report_file}", file=sys.stderr)
 
     def _match_av(self, path: str) -> Optional[str]:
 
@@ -717,10 +746,6 @@ def get_freq_words():
     return frozenset(map(str.lower, map(itemgetter(1), result)))
 
 
-def sort_custom_list(a: list):
-    return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
-
-
 def parse_config(configfile: str) -> dict:
 
     default = {
@@ -751,25 +776,11 @@ def parse_config(configfile: str) -> dict:
             "av_page": "/adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
             "non_av_page": "/torrents.php",
         },
-        "custom": {
-            "keyword_whitelist": [],
-            "keyword_blacklist": [],
-            "prefix_whitelist": [],
-            "prefix_blacklist": [],
-        }
     } # yapf: disable
 
     try:
-        with open(configfile, "r+", encoding="utf-8") as f:
+        with open(configfile, "r", encoding="utf-8") as f:
             config = yaml.load(f, Loader=yaml.CLoader)
-            old = config["custom"]
-            new = {k: sort_custom_list(old[k]) for k in default["custom"]}
-            if old != new:
-                config["custom"] = new
-                f.seek(0)
-                yaml.dump(config, f, sort_keys=False, Dumper=yaml.CDumper)
-                f.truncate()
-
         f = op.expanduser
         config["regex_file"] = f(config["regex_file"])
         config["local_json"][:] = map(f, config["local_json"])
@@ -780,7 +791,7 @@ def parse_config(configfile: str) -> dict:
             yaml.dump(default, f, sort_keys=False, Dumper=yaml.CDumper)
         sys.exit(f"Please edit {configfile} before running me again.")
     except (KeyError, ValueError) as e:
-        sys.exit(f"error in configfile: {e}")
+        sys.exit(f"Error in config file: {e}")
 
 
 def parse_arguments():
@@ -864,9 +875,7 @@ def main():
 
     config = parse_config("config.yaml")
     args = parse_arguments()
-
-    if args.file:
-        config["regex_file"] = args.file
+    regex_file = args.file or config["regex_file"]
 
     if args.mode == "build":
 
@@ -883,17 +892,16 @@ def main():
         )
         builder = Builder(
             scrapers=scrapers,
-            regex_file=config["regex_file"],
+            regex_file=regex_file,
             keyword_max=config["keyword_max"],
             prefix_max=config["prefix_max"],
-            custom=config["custom"],
         )
         if args.local:
             regex = builder.from_cache()
         else:
             regex = builder.from_web()
         if regex:
-            print(f"\nResult ({len(regex)} chars):")
+            print(f"Result: {len(regex)} chars", file=sys.stderr)
             print(regex)
         else:
             print("Generating regex failed.", file=sys.stderr)
@@ -904,7 +912,7 @@ def main():
             config["mteam"]["page_max"] = args.mteam_max
 
         analyzer = Analyzer(
-            regex_file=config["regex_file"],
+            regex_file=regex_file,
             mteam=MTeamCollector(**config["mteam"]),
         )
 

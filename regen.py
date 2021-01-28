@@ -651,6 +651,7 @@ Author: David Pi <libertypi@gmail.com>""",
 
 def main():
 
+    from sys import stderr
     args = parse_arguments()
 
     if args.file is None:
@@ -667,13 +668,13 @@ def main():
         print(regex)
 
         if args.verify:
-            print("\nLength:", len(regex))
+            print("\nLength:", len(regex), file=stderr)
             try:
                 regen.raise_for_verify()
             except ValueError as e:
-                print("Verify failed:", e)
+                print("Verify failed:", e, file=stderr)
             else:
-                print("Verify passed.")
+                print("Verify passed.", file=stderr)
 
 
 if __name__ == "__main__":
