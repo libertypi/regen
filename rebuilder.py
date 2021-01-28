@@ -238,6 +238,7 @@ class Builder:
         self._update_file(self._regex_file, regex)
         return regex
 
+    @profile
     def _build_regex(self,
                      name: str,
                      data: Dict[str, dict],
@@ -249,13 +250,17 @@ class Builder:
         print(f"Entry: {sum(data.values())}, {name}: {len(data)}")
 
         words = sorted(data, key=data.get, reverse=True)
-        i = getattr(self, f"_{name}_max")
-        if 0 < i < len(words):
-            thresh = data[words[i]]
-            for i in range(i + 1, len(words)):
-                if data[words[i]] < thresh:
-                    break
-            words = words[:i]
+        lo = getattr(self, f"_{name}_max")
+        hi = len(words)
+        if 0 < lo < hi:
+            x = data[words[lo]]
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if x > data[words[mid]]:
+                    hi = mid
+                else:
+                    lo = mid + 1
+            words = words[:lo]
 
         print("Cut: {} (frequency: {})".format(
             len(words), data[words[-1]] if words else None))
@@ -267,11 +272,9 @@ class Builder:
 
         regex = chain(whitelist, blacklist, filterlist)
         regex = re.compile("|".join(regex)).fullmatch
-        words = set(filterfalse(regex, words))
-
-        words.update(whitelist)
-        words.difference_update(blacklist)
-        words = sorted(words)
+        words[:] = filterfalse(regex, words)
+        words.extend(whitelist)
+        words.sort()
 
         print(f"Final: {len(words)}")
 
@@ -786,15 +789,15 @@ def parse_arguments():
         "--local",
         dest="local",
         action="store_true",
-        help="use cached data instead of web scraping (default %(default)s)",
+        help="use cached data instead of web scraping "
+        "(default %(default)s)",
     )
     parser.add_argument(
         "-f",
         "--file",
         dest="file",
         action="store",
-        help=
-        "the file for saving or reading regex, override 'regex_file' config",
+        help="the target file, override 'regex_file' in config",
     )
     parser.add_argument(
         "--pmax",
@@ -802,7 +805,8 @@ def parse_arguments():
         action="store",
         type=int,
         default=3000,
-        help="maximum prefixes for building regex (default: %(default)s)",
+        help="maximum prefixes to use "
+        "(0 for unlimited, default: %(default)s)",
     )
     parser.add_argument(
         "--kmax",
@@ -810,7 +814,8 @@ def parse_arguments():
         action="store",
         type=int,
         default=200,
-        help="maximum keywords for building regex (default: %(default)s)",
+        help="maximum keywords to use "
+        "(0 for unlimited, default: %(default)s)",
     )
     parser.add_argument(
         "--mtmax",
@@ -818,14 +823,11 @@ def parse_arguments():
         action="store",
         type=int,
         default=500,
-        help="maximum mteam pages for scraping (default: %(default)s)",
+        help="maximum mteam pages for scraping "
+        "(default: %(default)s)",
     )
 
-    args = parser.parse_args()
-    if args.mteam_max <= 0 or args.prefix_max <= 0:
-        parser.error(
-            "mteam_max and prefix_max should be an integer greater than zero")
-    return args
+    return parser.parse_args()
 
 
 def main():
