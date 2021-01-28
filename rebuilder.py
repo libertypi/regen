@@ -238,7 +238,6 @@ class Builder:
         self._update_file(self._regex_file, regex)
         return regex
 
-    @profile
     def _build_regex(self,
                      name: str,
                      data: Dict[str, dict],
