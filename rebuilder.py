@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 
 import argparse
-import concurrent.futures as cf
 import json
 import os
 import os.path as op
@@ -10,7 +9,8 @@ import reprlib
 import subprocess
 import sys
 from collections import Counter, defaultdict
-from configparser import ConfigParser
+from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
+                                as_completed)
 from itertools import chain, filterfalse, islice, repeat, tee
 from operator import itemgetter
 from pathlib import Path
@@ -18,6 +18,7 @@ from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
 
 import requests
+import yaml
 from lxml.etree import XPath
 from lxml.html import HtmlElement
 from lxml.html import fromstring as html_fromstring
@@ -43,7 +44,7 @@ class Scraper:
         if isinstance(xpath, str):
             xpath = XPath(xpath, smart_strings=False)
 
-        with cf.ThreadPoolExecutor() as ex:
+        with ThreadPoolExecutor() as ex:
             for path in paths:
                 print(f"  {path}: ", end="", flush=True)
                 lo = 1
@@ -63,8 +64,10 @@ class Scraper:
 
 class JavBusScraper(Scraper):
 
-    def __init__(self) -> None:
+    def __init__(self, western, jav):
 
+        self.western = western
+        self.jav = jav
         self.xpath = XPath(
             './/div[@id="waterfall"]//a[@class="movie-box"]'
             '//span/date[1]/text()',
@@ -80,34 +83,37 @@ class JavBusScraper(Scraper):
                 raise LastPageReached(page)
             raise
 
-    def get_id(self):
-
-        return self._scrape(
-            base="https://www.javbus.com",
-            paths=("/page", "/uncensored/page", "/genre/hd",
-                   "/uncensored/genre/hd"),
-            xpath=self.xpath,
-            step=500,
-        )
-
     def get_keyword(self):
 
+        config = self.western
         result = self._scrape(
-            base="https://www.javbus.org",
-            paths=("/page", *(f"/studio/{i}" for i in range(1, 5))),
+            base=config["domain"],
+            paths=config["page"],
             xpath=self.xpath,
             step=500,
         )
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         return Counter(m[1].lower() for m in map(matcher, result) if m).items()
 
+    def get_id(self):
+
+        config = self.jav
+        return self._scrape(
+            base=config["domain"],
+            paths=config["page"],
+            xpath=self.xpath,
+            step=500,
+        )
+
 
 class JavDBScraper(Scraper):
 
     DOMAIN = "https://javdb.com"
 
-    def __init__(self) -> None:
+    def __init__(self, western, jav):
 
+        self.western = western
+        self.jav = jav
         self.nav_xp = XPath(
             '//section/div[@class="container"]//ul[@class="pagination-list"]/li'
             '/a[contains(@class, "is-current") and normalize-space()=$page]')
@@ -119,21 +125,12 @@ class JavDBScraper(Scraper):
             return tree
         raise LastPageReached(page)
 
-    def get_id(self) -> Iterator[str]:
-
-        return self._scrape(
-            base=self.DOMAIN,
-            paths=("/uncensored", "/"),
-            xpath=('.//div[@id="videos"]//a[@class="box"]'
-                   '/div[@class="uid"]/text()'),
-            step=100,
-        )
-
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
 
+        config = self.western
         result = self._scrape(
-            base=self.DOMAIN,
-            paths=("/series/western",),
+            base=config["domain"],
+            paths=config["page"],
             xpath=('//div[@id="series"]//div[@class="box"]'
                    '/a[@title and strong and span]'),
             step=100,
@@ -149,68 +146,77 @@ class JavDBScraper(Scraper):
                 except TypeError:
                     pass
 
+    def get_id(self) -> Iterator[str]:
 
-class GithubScraper:
+        config = self.jav
+        return self._scrape(
+            base=config["domain"],
+            paths=config["page"],
+            xpath=('.//div[@id="videos"]//a[@class="box"]'
+                   '/div[@class="uid"]/text()'),
+            step=100,
+        )
 
-    @staticmethod
-    def get_id() -> List[str]:
 
-        print("Downloading GitHub database...")
-        return _request(
-            "https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"
-        ).json()
+class OnlineJsonScraper:
+
+    def __init__(self, config: List[str]) -> None:
+        self.config = config
+
+    def get_id(self) -> Iterable[str]:
+
+        print("Downloading online json...")
+        for url in self.config:
+            yield from _request(url).json()
 
 
-class MGSLoader:
+class LocalJSONLoader:
 
-    def __init__(self, json_file: str) -> None:
-        self.json_file = Path(json_file)
+    def __init__(self, config: List[str]) -> None:
+        self.filelist = config
 
     def get_id(self) -> List[str]:
 
-        print("Loading MGStage data...")
-        try:
-            with open(self.json_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, ValueError) as e:
-            print(e, file=sys.stderr)
-            return ()
+        print("Reading local json...")
+        for path in self.filelist:
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, ValueError) as e:
+                print(e, file=sys.stderr)
+            else:
+                yield from data
 
 
 class Builder:
 
-    def __init__(self, *, regex_file: str, keyword_max: int, prefix_max: int,
-                 mgs_json: str, raw_dir: str) -> None:
+    def __init__(self, scrapers: List[Scraper], regex_file: str,
+                 keyword_max: int, prefix_max: int,
+                 custom: Dict[str, List[str]]) -> None:
 
+        self._scrapers = scrapers
         self._regex_file = Path(regex_file)
-        self._raw_dir = Path(raw_dir)
-        self._jsonfile = self._raw_dir.joinpath("data.json")
+        self._datafile = Path("data.yaml")
         self._keyword_max = keyword_max
         self._prefix_max = prefix_max
-        self._mgs_json = mgs_json
-        self._scrapers = None
+        self._custom = custom
 
     def from_web(self):
-
-        if not self._scrapers:
-            self._scrapers = [JavBusScraper(), JavDBScraper(), GithubScraper]
-            if self._mgs_json:
-                self._scrapers.append(MGSLoader(self._mgs_json))
 
         data = {
             "keyword": self._fetch_keyword(),
             "prefix": self._fetch_prefix(),
         }
-        with open(self._jsonfile, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
+        with open(self._datafile, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, sort_keys=False, Dumper=yaml.CDumper)
 
         return self._build(data)
 
     def from_cache(self):
 
         try:
-            with open(self._jsonfile, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            with open(self._datafile, "r", encoding="utf-8") as f:
+                data = yaml.load(f, Loader=yaml.CLoader)
         except (OSError, ValueError) as e:
             sys.exit(e)
 
@@ -264,11 +270,8 @@ class Builder:
         print("Cut: {} (frequency: {})".format(
             len(words), data[words[-1]] if words else None))
 
-        whitelist = self._update_file(
-            self._raw_dir.joinpath(f"{name}_whitelist.txt"))
-        blacklist = self._update_file(
-            self._raw_dir.joinpath(f"{name}_blacklist.txt"))
-
+        whitelist = self._custom[name + "_whitelist"]
+        blacklist = self._custom[name + "_blacklist"]
         regex = chain(whitelist, blacklist, filterlist)
         regex = re.compile("|".join(regex)).fullmatch
         words[:] = filterfalse(regex, words)
@@ -331,35 +334,31 @@ class Builder:
         return dict(d)
 
     @staticmethod
-    def _update_file(file: Path, content: str = None) -> List[str]:
+    def _update_file(file: Path, content: str):
 
-        new = [] if content is None else [content]
+        if not content.endswith("\n"):
+            content += "\n"
         try:
             with open(file, "r+", encoding="utf-8") as f:
-                old = f.read().splitlines()
-                if not new:
-                    new.extend(
-                        set(map(str.lower, filter(None, map(str.strip, old)))))
-                    new.sort()
-                if old != new:
+                old = f.read()
+                if old != content:
                     f.seek(0)
-                    f.writelines(i + "\n" for i in new)
+                    f.write(content)
                     f.truncate()
                     print(f"Update: {file}")
         except FileNotFoundError:
             file.parent.mkdir(parents=True, exist_ok=True)
             with open(file, mode="w", encoding="utf-8") as f:
-                f.writelines(i + "\n" for i in new)
+                f.write(content)
             print(f"Create: {file}")
-        return new
 
 
 class MTeamCollector:
 
     DOMAIN = "https://pt.m-team.cc"
 
-    def __init__(self, *, page_max: int, av_page: str, non_av_page: str,
-                 username: str, password: str, cache_dir: str) -> None:
+    def __init__(self, *, username: str, password: str, page_max: int,
+                 cache_dir: str, av_page: str, non_av_page: str) -> None:
 
         cache_dir = op.normpath(cache_dir)
         self._cache_dirs = (
@@ -407,9 +406,9 @@ class MTeamCollector:
         print(f"Scanning mteam ({total} pages)...", end="", flush=True)
         self._login()
 
-        with cf.ThreadPoolExecutor() as ex:
+        with ThreadPoolExecutor() as ex:
 
-            for ft in cf.as_completed(
+            for ft in as_completed(
                     ex.submit(_request, url, params={"page": i})
                     for i in range(1, total + 1)):
 
@@ -429,11 +428,11 @@ class MTeamCollector:
                         pool[ex.submit(_request, url)] = url, path
             print(total)
 
-            for ft in cf.as_completed(pool):
+            for ft in as_completed(pool):
                 url, path = pool[ft]
                 print(f"Downloading: {url}")
                 try:
-                    yield self._parse_torrent(ft.result().content, path)
+                    self._parse_torrent(ft.result().content, path)
                 except requests.RequestException as e:
                     print(e, file=sys.stderr)
                 except Exception as e:
@@ -442,6 +441,8 @@ class MTeamCollector:
                         os.unlink(path)
                     except OSError:
                         pass
+                else:
+                    yield path
 
     def _login(self):
 
@@ -462,7 +463,7 @@ class MTeamCollector:
         self._logined = True
 
     def _parse_torrent(self, content: bytes, path: str):
-        """Parse a torrent, write file list to file and return the path."""
+        """Parse a torrent, write file list to `path`."""
 
         try:
             files = Torrent.from_string(content).files
@@ -509,13 +510,10 @@ class MTeamCollector:
             with open(path, "w", encoding="utf-8") as f:
                 f.writelines(i.lower() + "\n" for i in files)
 
-        return path
-
 
 class Analyzer:
 
-    def __init__(self, *, regex_file: str, mteam: MTeamCollector,
-                 report_dir: str) -> None:
+    def __init__(self, *, regex_file: str, mteam: MTeamCollector) -> None:
 
         try:
             with open(regex_file, "r", encoding="utf-8") as f:
@@ -538,16 +536,14 @@ class Analyzer:
             flags=re.M).search
 
         self._mteam = mteam
-        self._report_dir = Path(report_dir)
-        self._report_dir.mkdir(parents=True, exist_ok=True)
 
     def analyze_av(self, local: bool = False):
 
         print("Matching test begins...")
 
         total = unmatched = 0
-        unmatch_raw = self._report_dir.joinpath("unmatch_raw.txt")
-        unmatch_freq = self._report_dir.joinpath("unmatch_frequency.txt")
+        report_file = "unmatch_report.txt"
+        raw_file = "unmatch_raw.txt"
         sep = "-" * 80 + "\n"
         groups = defaultdict(list)
         prefix_count = Counter()
@@ -562,8 +558,8 @@ class Analyzer:
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=True)
 
-        with cf.ProcessPoolExecutor(max_workers=None) as ex, open(
-                unmatch_raw, "w", encoding="utf-8") as f:
+        with ProcessPoolExecutor() as ex, open(raw_file, "w",
+                                               encoding="utf-8") as f:
 
             for content in ex.map(self._match_av, paths, chunksize=100):
 
@@ -598,7 +594,7 @@ class Analyzer:
                  if v >= 5 and k not in freq_words]
         words.sort(key=lambda t: (-t[0], t[1]))
 
-        with open(unmatch_freq, "w", encoding="utf-8") as f:
+        with open(report_file, "w", encoding="utf-8") as f:
             f.write(brief)
 
             f.write("\n\nPotential ID Prefixes:\n")
@@ -608,14 +604,14 @@ class Analyzer:
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
-        print(f"Result saved to: {unmatch_freq}")
+        print(f"Result saved to: {report_file}")
 
     def analyze_non_av(self, local: bool = False):
 
         print("Mismatching test begins...")
 
         total = mismatched = 0
-        mismatched_file = self._report_dir.joinpath("mismatch_frequency.txt")
+        report_file = "mismatch_report.txt"
         word_searcher = re.compile(r"[a-z]+").search
 
         groups = defaultdict(list)
@@ -624,7 +620,7 @@ class Analyzer:
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=False)
 
-        with cf.ProcessPoolExecutor() as ex:
+        with ProcessPoolExecutor() as ex:
 
             for video in ex.map(self._match_nonav, paths, chunksize=100):
 
@@ -648,12 +644,12 @@ class Analyzer:
         result = [(word_count[k], len(v), k, set(v)) for k, v in groups.items()]
         result.sort(key=lambda t: (-t[0], -t[1], t[2]))
 
-        with open(mismatched_file, "w", encoding="utf-8") as f:
+        with open(report_file, "w", encoding="utf-8") as f:
             f.write(brief)
             f.write("\n\n")
             f.writelines(self._format_report(result))
 
-        print(f"Result saved to: {mismatched_file}")
+        print(f"Result saved to: {report_file}")
 
     def _match_av(self, path: str) -> Optional[str]:
 
@@ -721,36 +717,70 @@ def get_freq_words():
     return frozenset(map(str.lower, map(itemgetter(1), result)))
 
 
-def parse_config(configfile: str):
+def sort_custom_list(a: list):
+    return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
 
-    parser = ConfigParser()
-    parser["DEFAULT"] = {
-        "regex_file":
-            "regex.txt",
-        "cache_dir":
-            "cache",
-        "mgs_json":
-            "",
-        "mteam_username":
-            "",
-        "mteam_password":
-            "",
-        "mteam_av_page":
-            "/adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
-        "mteam_non_av_page":
-            "/torrents.php",
-    }
 
-    if parser.read(configfile):
-        config = parser["DEFAULT"]
-        config["regex_file"] = op.expanduser(config["regex_file"])
-        config["cache_dir"] = op.expanduser(config["cache_dir"])
-        config["mgs_json"] = op.expanduser(config["mgs_json"])
+def parse_config(configfile: str) -> dict:
+
+    default = {
+        "regex_file": "regex.txt",
+        "keyword_max": 200,
+        "prefix_max": 3000,
+        "local_json": [],
+        "online_json": ["https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"],
+        "javbus": {
+            "western": {
+                "domain": "https://www.javbus.org",
+                "page": ["/page", "/studio/1", "/studio/2", "/studio/3", "/studio/4"],
+            },
+            "jav": {
+                "domain": "https://www.javbus.com",
+                "page": ["/page", "/uncensored/page", "/genre/hd", "/uncensored/genre/hd"],
+            },
+        },
+        "javdb": {
+            "western": {"domain": "https://javdb.com", "page": ["/series/western"]},
+            "jav": {"domain": "https://javdb.com", "page": ["/uncensored", "/"]},
+        },
+        "mteam": {
+            "username": "",
+            "password": "",
+            "page_max": 500,
+            "cache_dir": "cache",
+            "av_page": "/adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
+            "non_av_page": "/torrents.php",
+        },
+        "custom": {
+            "keyword_whitelist": [],
+            "keyword_blacklist": [],
+            "prefix_whitelist": [],
+            "prefix_blacklist": [],
+        }
+    } # yapf: disable
+
+    try:
+        with open(configfile, "r+", encoding="utf-8") as f:
+            config = yaml.load(f, Loader=yaml.CLoader)
+            old = config["custom"]
+            new = {k: sort_custom_list(old[k]) for k in default["custom"]}
+            if old != new:
+                config["custom"] = new
+                f.seek(0)
+                yaml.dump(config, f, sort_keys=False, Dumper=yaml.CDumper)
+                f.truncate()
+
+        f = op.expanduser
+        config["regex_file"] = f(config["regex_file"])
+        config["local_json"][:] = map(f, config["local_json"])
+        config["mteam"]["cache_dir"] = f(config["mteam"]["cache_dir"])
         return config
-
-    with open(configfile, "w", encoding="utf-8") as f:
-        parser.write(f)
-    sys.exit(f"Please edit {configfile} before running me again.")
+    except FileNotFoundError:
+        with open(configfile, "w", encoding="utf-8") as f:
+            yaml.dump(default, f, sort_keys=False, Dumper=yaml.CDumper)
+        sys.exit(f"Please edit {configfile} before running me again.")
+    except (KeyError, ValueError) as e:
+        sys.exit(f"error in configfile: {e}")
 
 
 def parse_arguments():
@@ -796,34 +826,28 @@ def parse_arguments():
         "--file",
         dest="file",
         action="store",
-        help="the target file, override 'regex_file' in config",
-    )
-    parser.add_argument(
-        "--pmax",
-        dest="prefix_max",
-        action="store",
-        type=int,
-        default=3000,
-        help="maximum prefixes to use "
-        "(0 for unlimited, default: %(default)s)",
+        help="the target file, override config 'regex_file'",
     )
     parser.add_argument(
         "--kmax",
         dest="keyword_max",
         action="store",
         type=int,
-        default=200,
-        help="maximum keywords to use "
-        "(0 for unlimited, default: %(default)s)",
+        help="maximum keywords, override config 'keyword_max' (0 for unlimited)",
+    )
+    parser.add_argument(
+        "--pmax",
+        dest="prefix_max",
+        action="store",
+        type=int,
+        help="maximum prefixes, override config 'prefix_max' (0 for unlimited)",
     )
     parser.add_argument(
         "--mtmax",
         dest="mteam_max",
         action="store",
         type=int,
-        default=500,
-        help="maximum mteam pages for scraping "
-        "(default: %(default)s)",
+        help="maximum mteam pages to scan, override config '[mteam]page_max'",
     )
 
     return parser.parse_args()
@@ -831,23 +855,43 @@ def parse_arguments():
 
 def main():
 
-    os.chdir(op.dirname(__file__))
+    config = op.join(op.dirname(__file__), "builder")
+    try:
+        os.chdir(config)
+    except FileNotFoundError:
+        os.mkdir(config)
+        os.chdir(config)
 
-    config = parse_config("builder.ini")
+    config = parse_config("config.yaml")
     args = parse_arguments()
-    regex_file = args.file or config["regex_file"]
+
+    if args.file:
+        config["regex_file"] = args.file
 
     if args.mode == "build":
 
-        builder = Builder(
-            regex_file=regex_file,
-            keyword_max=args.keyword_max,
-            prefix_max=args.prefix_max,
-            mgs_json=config["mgs_json"],
-            raw_dir="raw",
-        )
-        regex = builder.from_cache() if args.local else builder.from_web()
+        if args.keyword_max is not None:
+            config["keyword_max"] = args.keyword_max
+        if args.prefix_max is not None:
+            config["prefix_max"] = args.prefix_max
 
+        scrapers = (
+            JavBusScraper(**config["javbus"]),
+            JavDBScraper(**config["javdb"]),
+            OnlineJsonScraper(config["online_json"]),
+            LocalJSONLoader(config["local_json"]),
+        )
+        builder = Builder(
+            scrapers=scrapers,
+            regex_file=config["regex_file"],
+            keyword_max=config["keyword_max"],
+            prefix_max=config["prefix_max"],
+            custom=config["custom"],
+        )
+        if args.local:
+            regex = builder.from_cache()
+        else:
+            regex = builder.from_web()
         if regex:
             print(f"\nResult ({len(regex)} chars):")
             print(regex)
@@ -856,18 +900,12 @@ def main():
 
     else:
 
-        mteam = MTeamCollector(
-            page_max=args.mteam_max,
-            av_page=config["mteam_av_page"],
-            non_av_page=config["mteam_non_av_page"],
-            username=config["mteam_username"],
-            password=config["mteam_password"],
-            cache_dir=config["cache_dir"],
-        )
+        if args.mteam_max is not None:
+            config["mteam"]["page_max"] = args.mteam_max
+
         analyzer = Analyzer(
-            regex_file=regex_file,
-            mteam=mteam,
-            report_dir="report",
+            regex_file=config["regex_file"],
+            mteam=MTeamCollector(**config["mteam"]),
         )
 
         if args.mode == "test_match":

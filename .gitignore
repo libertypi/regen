@@ -1,6 +1,4 @@
-*.ini
-cookies
-report/
+builder/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
