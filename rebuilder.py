@@ -42,8 +42,7 @@ class Scraper:
     def get_tree(self, url: str, i: int) -> HtmlElement:
         raise NotImplementedError
 
-    def _scrape(self, xpath: Union[XPath, str], domain: str,
-                pages: Tuple[str]) -> Iterator[str]:
+    def _scrape(self, xpath: Union[XPath, str], domain: str, pages: Tuple[str]):
 
         print(f"Scanning {urlsplit(domain).netloc}", file=STDERR)
         if isinstance(xpath, str):
@@ -57,8 +56,8 @@ class Scraper:
                 while True:
                     hi = lo + self.STEP
                     print(f"{lo}..", end="", flush=True, file=STDERR)
-                    result = self.ex.map(self.get_tree, url, range(lo, hi))
-                    yield from chain.from_iterable(map(xpath, result))
+                    trees = self.ex.map(self.get_tree, url, range(lo, hi))
+                    yield from chain.from_iterable(map(xpath, trees))
                     lo = hi
             except LastPageReached as e:
                 print(e, file=STDERR)
@@ -87,9 +86,9 @@ class JavBusScraper(Scraper):
             raise
 
     def get_keyword(self):
-        matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
-        result = self._scrape(self.xpath, **self.western)
-        return Counter(m[1].lower() for m in map(matcher, result) if m).items()
+        f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
+        r = self._scrape(self.xpath, **self.western)
+        return Counter(m[1].lower() for m in map(f, r) if m).items()
 
     def get_id(self):
         return self._scrape(self.xpath, **self.jav)
@@ -119,11 +118,11 @@ class JavDBScraper(Scraper):
         searcher = re.compile(r"\d+").search
         xpath = '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]'
 
-        for t in self._scrape(xpath, **self.western):
-            title = t.findtext("strong").replace(" ", "").lower()
+        for a in self._scrape(xpath, **self.western):
+            title = a.findtext("strong").replace(" ", "").lower()
             if matcher(title):
                 try:
-                    yield title, int(searcher(t.findtext("span"))[0])
+                    yield title, int(searcher(a.findtext("span"))[0])
                 except TypeError:
                     pass
 
@@ -261,14 +260,14 @@ class MTeamCollector:
         if self._logined:
             return
         try:
-            res = session.post(
+            r = session.post(
                 url=self.DOMAIN + "/takelogin.php",
                 data=self._account,
                 headers={"referer": self.DOMAIN + "/login.php"},
             )
-            res.raise_for_status()
-            res = session.head(self._urls[0], allow_redirects=True)
-            if "/login.php" in res.url:
+            r.raise_for_status()
+            r = session.head(self._urls[0], allow_redirects=True)
+            if "/login.php" in r.url:
                 raise requests.RequestException("invalid credentials")
         except requests.RequestException as e:
             sys.exit(f"login failed: {e}")
@@ -380,10 +379,14 @@ class Builder:
 
         print("-" * 50, file=STDERR)
         if not (keyword and prefix):
+            print("Generating regex failed.", file=STDERR)
             return
 
         regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
         self._update_file(self._regex_file, regex)
+
+        print(f"Result: {len(regex)} chars", file=STDERR)
+        print(regex)
         return regex
 
     def _build_regex(self,
@@ -532,8 +535,9 @@ class Analyzer:
 
     def __init__(self, config: dict) -> None:
 
+        self.regex_file = config["regex_file"]
         try:
-            with open(config["regex_file"], "r", encoding="utf-8") as f:
+            with open(self.regex_file, "r", encoding="utf-8") as f:
                 regex = f.readline().strip()
                 if f.read():
                     raise ValueError("regex file should contain only one line")
@@ -555,17 +559,15 @@ class Analyzer:
 
     def analyze_av(self, local: bool = False):
 
-        print("Matching test begins...", file=STDERR)
+        print("Matching test begins with av torrents...", file=STDERR)
 
-        total = unmatched = 0
-        report_file = "unmatch_report.txt"
-        raw_file = "unmatch_raw.txt"
-        sep = "-" * 80 + "\n"
+        total = count = 0
+        report_file = "av_report.txt"
+        raw_file = "mismatch_raw.txt"
         groups = defaultdict(list)
         prefix_count = Counter()
         word_count = Counter()
         tmp = set()
-
         prefix_finder = re.compile(
             r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:[hm]hb[0-9]{,2})?)\b.*$",
             flags=re.M).findall
@@ -576,36 +578,27 @@ class Analyzer:
 
         with ProcessPoolExecutor() as ex, open(raw_file, "w",
                                                encoding="utf-8") as f:
-
             freq_words = ex.submit(get_freq_words)
             for content in ex.map(self._match_av, paths, chunksize=100):
-
                 total += 1
                 if content:
-                    unmatched += 1
-                    f.write(sep)
+                    count += 1
+                    f.write("---\n")
                     f.write(content)
-
                     for string, prefix in prefix_finder(content):
                         groups[prefix].append(string)
                         tmp.add(prefix)
-
                     prefix_count.update(tmp)
                     tmp.clear()
-
                     tmp.update(word_finder(content))
                     word_count.update(tmp)
                     tmp.clear()
-
             freq_words = freq_words.result()
 
-        brief = self._get_brief("Match", total, total - unmatched)
-        print(brief, file=STDERR)
-
-        prefixes = [(i, len(v), k, set(v))
-                    for k, v in groups.items()
-                    if (i := prefix_count[k]) >= 5 and k not in freq_words]
-        prefixes.sort(key=lambda t: (-t[0], -t[1], t[2]))
+        result = [(i, len(v), k, set(v))
+                  for k, v in groups.items()
+                  if (i := prefix_count[k]) >= 5 and k not in freq_words]
+        result.sort(key=lambda t: (-t[0], -t[1], t[2]))
 
         words = [(v, k)
                  for k, v in word_count.items()
@@ -613,23 +606,23 @@ class Analyzer:
         words.sort(key=lambda t: (-t[0], t[1]))
 
         with open(report_file, "w", encoding="utf-8") as f:
-            f.write(brief)
-
-            f.write("\n\nPotential ID Prefixes:\n")
-            f.writelines(self._format_report(prefixes))
+            for line in self._format_report(total, "Failed", count,
+                                            "Potential ID Prefixes", result):
+                print(line, end="")
+                f.write(line)
 
             f.write("\n\nPotential Keywords:\n")
-            f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
+            f.write(f'{"item":>6}  word\n{"-"*80}\n')
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
         print(f"Result saved to: {report_file}", file=STDERR)
 
     def analyze_non_av(self, local: bool = False):
 
-        print("Mismatching test begins...", file=STDERR)
+        print("Matching test begins with non-av torrents...", file=STDERR)
 
-        total = mismatched = 0
-        report_file = "mismatch_report.txt"
+        total = count = 0
+        report_file = "non_av_report.txt"
         word_searcher = re.compile(r"[a-z]+").search
 
         groups = defaultdict(list)
@@ -639,12 +632,10 @@ class Analyzer:
         paths = paths(is_av=False)
 
         with ProcessPoolExecutor() as ex:
-
             for video in ex.map(self._match_nonav, paths, chunksize=100):
-
                 total += 1
                 if video:
-                    mismatched += 1
+                    count += 1
                     for string in video:
                         try:
                             word = word_searcher(string)[0]
@@ -652,47 +643,39 @@ class Analyzer:
                             word = string
                         groups[word].append(string)
                         tmp.add(word)
-
                     word_count.update(tmp)
                     tmp.clear()
-
-        brief = self._get_brief("Mismatch", total, mismatched)
-        print(brief, file=STDERR)
 
         result = [(word_count[k], len(v), k, set(v)) for k, v in groups.items()]
         result.sort(key=lambda t: (-t[0], -t[1], t[2]))
 
         with open(report_file, "w", encoding="utf-8") as f:
-            f.write(brief)
-            f.write("\n\n")
-            f.writelines(self._format_report(result))
-
+            for line in self._format_report(total, "Matched", count,
+                                            "Matched Strings", result):
+                print(line, end="")
+                f.write(line)
         print(f"Result saved to: {report_file}", file=STDERR)
 
     def _match_av(self, path: str) -> Optional[str]:
-
         with open(path, "r", encoding="utf-8") as f:
             a, b = tee(filter(self._filter, f))
             if not any(map(self._matcher, a)):
                 return "".join(b)
 
     def _match_nonav(self, path: str) -> Tuple[str]:
-
         with open(path, "r", encoding="utf-8") as f:
             return tuple(
                 m[1] for m in map(self._matcher, filter(self._filter, f)) if m)
 
-    @staticmethod
-    def _get_brief(name: str, total: int, n: int):
-        return f"Total: {total}. {name}: {n}. Percentage: {n / total:.2%}."
-
-    @staticmethod
-    def _format_report(result: Iterable):
+    def _format_report(self, total, name, count, title, result):
         r = reprlib.repr
-        yield "{:>6}  {:>6}  {:15}  {}\n{:->80}\n".format(
-            "item", "occur", "word", "strings", "")
+        yield (
+            f"Regex file: {self.regex_file}\n"
+            f"Total: {total}, {name}: {count}, Percentage: {count / total:.2%}\n\n"
+            f"{title}:\n"
+            f'{"item":>6}  {"occur":>6}  {"word":16}strings\n{"-" * 80}\n')
         for i, j, k, s in result:
-            yield f"{i:6d}  {j:6d}  {k:15}  {r(s)[1:-1]}\n"
+            yield f"{i:6d}  {j:6d}  {k:16}{r(s)[1:-1]}\n"
 
 
 def _init_session():
@@ -717,18 +700,18 @@ def _init_session():
 
 def _request(url: str, **kwargs):
 
-    response = session.get(url, timeout=(6.1, 30), **kwargs)
+    response = session.get(url, timeout=(9.1, 30), **kwargs)
     response.raise_for_status()
     return response
 
 
-def get_freq_words():
-    """Get wordlist of the top 3000 English words which is longer than 3
+def get_freq_words(k: int = 3000):
+    """Get wordlist of the top `k` English words which is longer than 3
     letters."""
 
-    url = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    result = re.finditer(r"^\s*([A-Za-z]{3,})\s*$", _request(url).text, re.M)
-    return frozenset(map(str.lower, map(itemgetter(1), islice(result, 3000))))
+    u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+    m = re.finditer(r"^\s*([A-Za-z]{3,})\s*$", _request(u).text, re.M)
+    return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
 
 
 def parse_config(configfile: str) -> dict:
@@ -739,11 +722,11 @@ def parse_config(configfile: str) -> dict:
         a = op.normpath
         b = op.expanduser
         config["regex_file"] = a(b(config["regex_file"]))
-        config["local_json"] = tuple(a(b(p)) for p in config["local_json"])
+        config["local_json"][:] = (a(b(p)) for p in config["local_json"])
         config["mteam"]["cache_dir"] = a(b(config["mteam"]["cache_dir"]))
     except FileNotFoundError:
         pass
-    except (KeyError, ValueError) as e:
+    except Exception as e:
         sys.exit(f"Error in config file: {e}")
     else:
         return config
@@ -809,7 +792,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="test_mis",
-        help="mis-matching test with non-av torrents",
+        help="mismatching test with non-av torrents",
     )
     group.set_defaults(mode="build")
 
@@ -847,7 +830,7 @@ def parse_arguments():
         dest="mteam_max",
         action="store",
         type=int,
-        help="maximum mteam pages to scan, override config '[mteam]page_max'",
+        help="maximum mteam pages to scan, override config 'mteam/page_max'",
     )
 
     return parser.parse_args()
@@ -877,15 +860,9 @@ def main():
 
         builder = Builder(config)
         if args.local:
-            regex = builder.from_cache()
+            builder.from_cache()
         else:
-            regex = builder.from_web()
-
-        if regex:
-            print(f"Result: {len(regex)} chars", file=STDERR)
-            print(regex)
-        else:
-            print("Generating regex failed.", file=STDERR)
+            builder.from_web()
 
     else:
 
