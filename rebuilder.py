@@ -141,8 +141,14 @@ class OnlineJsonScraper:
 
     def get_id(self) -> Iterable[str]:
         print("Downloading online json...", file=STDERR)
-        for response in self.ex.map(_request, self.config):
-            yield from response.json()
+        if len(self.config) == 1:
+            return _request(self.config[0]).json()
+        return self._get_id_multifiles()
+
+    def _get_id_multifiles(self) -> Iterable[str]:
+        for ft in as_completed(
+                self.ex.submit(_request, u) for u in self.config):
+            yield from ft.result().json()
 
 
 class LocalJSONLoader:
@@ -154,14 +160,16 @@ class LocalJSONLoader:
 
     def get_id(self) -> Iterable[str]:
         print("Reading local json...", file=STDERR)
+        if len(self.config) == 1:
+            with open(self.config[0], "r", encoding="utf-8") as f:
+                return json.load(f)
+        return self._get_id_multifiles()
+
+    def _get_id_multifiles(self) -> Iterable[str]:
         for path in self.config:
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (OSError, ValueError) as e:
-                print(e, file=STDERR)
-            else:
-                yield from data
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            yield from data
 
 
 class MTeamCollector:
@@ -360,6 +368,36 @@ class Builder:
             sys.exit(e)
         return self._build(data)
 
+    def _scrape_keyword(self, scrapers) -> Dict[str, int]:
+
+        d = {}
+        setdefault = d.setdefault
+        freq = get_freq_words()
+
+        for s in scrapers:
+            if not hasattr(s, "get_keyword"):
+                continue
+            for k, v in s.get_keyword():
+                if k not in freq and setdefault(k, v) < v:
+                    d[k] = v
+        return self._sort_scrape(d.items())
+
+    def _scrape_prefix(self, scrapers) -> Dict[str, int]:
+
+        d = defaultdict(set)
+        r = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
+
+        for s in scrapers:
+            for m in filter(None, map(r, map(str.lower, s.get_id()))):
+                d[m[1]].add(int(m[2]))
+        return self._sort_scrape(zip(d, map(len, d.values())))
+
+    @staticmethod
+    def _sort_scrape(d: Iterable[Tuple[str, int]]):
+        d = sorted(d)
+        d.sort(key=itemgetter(1), reverse=True)
+        return dict(d)
+
     def _build(self, data: Dict[str, dict]):
 
         custom = self._load_custom()
@@ -388,6 +426,32 @@ class Builder:
         print(f"Result: {len(regex)} chars", file=STDERR)
         print(regex)
         return regex
+
+    def _load_custom(self) -> Dict[str, List[str]]:
+
+        try:
+            with open(self._customfile, "r+", encoding="utf-8") as f:
+                a = yaml.load(f, Loader=yaml.CLoader)
+                b = {k: self._sort_custom(v) for k, v in a.items()}
+                if a != b:
+                    a = b
+                    f.seek(0)
+                    yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
+                    f.truncate()
+        except FileNotFoundError:
+            a = {
+                "keyword whitelist": [],
+                "keyword blacklist": [],
+                "prefix whitelist": [],
+                "prefix blacklist": [],
+            }
+            with open(self._customfile, "w", encoding="utf-8") as f:
+                yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
+        return a
+
+    @staticmethod
+    def _sort_custom(a: List[str]):
+        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
 
     def _build_regex(self,
                      name: str,
@@ -451,62 +515,6 @@ class Builder:
             print(f"Regex length: {length} ({diff})", file=STDERR)
 
         return regex
-
-    def _scrape_keyword(self, scrapers) -> Dict[str, int]:
-
-        d = {}
-        setdefault = d.setdefault
-        freq = get_freq_words()
-
-        for s in scrapers:
-            if not hasattr(s, "get_keyword"):
-                continue
-            for k, v in s.get_keyword():
-                if k not in freq and setdefault(k, v) < v:
-                    d[k] = v
-        return self._sort_scrape(d.items())
-
-    def _scrape_prefix(self, scrapers) -> Dict[str, int]:
-
-        d = defaultdict(set)
-        r = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
-
-        for s in scrapers:
-            for m in filter(None, map(r, map(str.lower, s.get_id()))):
-                d[m[1]].add(int(m[2]))
-        return self._sort_scrape(zip(d, map(len, d.values())))
-
-    def _load_custom(self) -> Dict[str, List[str]]:
-
-        try:
-            with open(self._customfile, "r+", encoding="utf-8") as f:
-                a = yaml.load(f, Loader=yaml.CLoader)
-                b = {k: self._sort_custom(v) for k, v in a.items()}
-                if a != b:
-                    a = b
-                    f.seek(0)
-                    yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
-                    f.truncate()
-        except FileNotFoundError:
-            a = {
-                "keyword whitelist": [],
-                "keyword blacklist": [],
-                "prefix whitelist": [],
-                "prefix blacklist": [],
-            }
-            with open(self._customfile, "w", encoding="utf-8") as f:
-                yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
-        return a
-
-    @staticmethod
-    def _sort_custom(a: List[str]):
-        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
-
-    @staticmethod
-    def _sort_scrape(d: Iterable[Tuple[str, int]]):
-        d = sorted(d)
-        d.sort(key=itemgetter(1), reverse=True)
-        return dict(d)
 
     @staticmethod
     def _update_file(file: str, content: str):
@@ -603,7 +611,7 @@ class Analyzer:
         words.sort(key=f)
 
         with open(report_file, "w", encoding="utf-8") as f:
-            for line in self._format_report(total, "Failed", count,
+            for line in self._format_report(total, total - count,
                                             "Potential ID Prefixes", result):
                 print(line, end="")
                 f.write(line)
@@ -647,8 +655,8 @@ class Analyzer:
         result.sort(key=lambda t: (-t[0], t[1]))
 
         with open(report_file, "w", encoding="utf-8") as f:
-            for line in self._format_report(total, "Matched", count,
-                                            "Matched Strings", result):
+            for line in self._format_report(total, count, "Matched Strings",
+                                            result):
                 print(line, end="")
                 f.write(line)
         print(f"Result saved to: {report_file}", file=STDERR)
@@ -664,11 +672,11 @@ class Analyzer:
             return tuple(
                 m[1] for m in map(self.matcher, filter(self.extfilter, f)) if m)
 
-    def _format_report(self, total, name, count, title, result):
+    def _format_report(self, total, count, title, result):
         r = reprlib.repr
         yield (
             f"Regex file: {self.regex_file}\n"
-            f"Total: {total}, {name}: {count}, Percentage: {count / total:.2%}\n\n"
+            f"Total: {total}, Matched: {count}, Percentage: {count / total:.2%}\n\n"
             f"{title}:\n"
             f'{"torrent":>7}  {"word":16}strings\n{"-" * 80}\n')
         for i, k, s in result:
