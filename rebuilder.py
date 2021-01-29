@@ -13,7 +13,6 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
                                 as_completed)
 from itertools import chain, filterfalse, islice, repeat, tee
 from operator import itemgetter
-from pathlib import Path
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
 
@@ -27,6 +26,8 @@ from urllib3 import Retry
 
 from regen import Regen
 
+STDERR = sys.stderr
+
 
 class LastPageReached(Exception):
     pass
@@ -34,38 +35,41 @@ class LastPageReached(Exception):
 
 class Scraper:
 
-    def get_tree(self, url: str, page: int) -> HtmlElement:
+    __slots__ = ("ex", "western", "jav")
+    ex: ThreadPoolExecutor
+    STEP: int = 500
+
+    def get_tree(self, url: str, i: int) -> HtmlElement:
         raise NotImplementedError
 
-    def _scrape(self, base: str, paths: Tuple[str], xpath: Union[XPath, str],
-                step: int) -> Iterator[str]:
+    def _scrape(self, xpath: Union[XPath, str], domain: str,
+                pages: Tuple[str]) -> Iterator[str]:
 
-        print(f"Scanning {urlsplit(base).netloc}", file=sys.stderr)
+        print(f"Scanning {urlsplit(domain).netloc}", file=STDERR)
         if isinstance(xpath, str):
             xpath = XPath(xpath, smart_strings=False)
 
-        with ThreadPoolExecutor() as ex:
-            for path in paths:
-                print(f"  {path}: ", end="", flush=True, file=sys.stderr)
-                lo = 1
-                path = repeat(urljoin(base, path))
-
+        for page in pages:
+            lo = 1
+            print(f"  {page}: ", end="", flush=True, file=STDERR)
+            url = repeat(urljoin(domain, page))
+            try:
                 while True:
-                    print(f"{lo}..", end="", flush=True, file=sys.stderr)
-                    hi = lo + step
-                    result = ex.map(self.get_tree, path, range(lo, hi))
-                    try:
-                        yield from chain.from_iterable(map(xpath, result))
-                    except LastPageReached as e:
-                        print(e, file=sys.stderr)
-                        break
+                    hi = lo + self.STEP
+                    print(f"{lo}..", end="", flush=True, file=STDERR)
+                    result = self.ex.map(self.get_tree, url, range(lo, hi))
+                    yield from chain.from_iterable(map(xpath, result))
                     lo = hi
+            except LastPageReached as e:
+                print(e, file=STDERR)
 
 
 class JavBusScraper(Scraper):
 
-    def __init__(self, western, jav):
+    __slots__ = "xpath"
 
+    def __init__(self, ex, western, jav):
+        self.ex = ex
         self.western = western
         self.jav = jav
         self.xpath = XPath(
@@ -74,71 +78,48 @@ class JavBusScraper(Scraper):
             smart_strings=False)
 
     @staticmethod
-    def get_tree(url: str, page: int):
-
+    def get_tree(url: str, i: int):
         try:
-            return html_fromstring(_request(f"{url}/{page}").content)
+            return html_fromstring(_request(f"{url}/{i}").content)
         except requests.HTTPError as e:
             if e.response.status_code == 404:
-                raise LastPageReached(page)
+                raise LastPageReached(i)
             raise
 
     def get_keyword(self):
-
-        config = self.western
-        result = self._scrape(
-            base=config["domain"],
-            paths=config["page"],
-            xpath=self.xpath,
-            step=500,
-        )
         matcher = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
+        result = self._scrape(self.xpath, **self.western)
         return Counter(m[1].lower() for m in map(matcher, result) if m).items()
 
     def get_id(self):
-
-        config = self.jav
-        return self._scrape(
-            base=config["domain"],
-            paths=config["page"],
-            xpath=self.xpath,
-            step=500,
-        )
+        return self._scrape(self.xpath, **self.jav)
 
 
 class JavDBScraper(Scraper):
 
-    DOMAIN = "https://javdb.com"
+    __slots__ = "nav_xp"
+    STEP = 100
 
-    def __init__(self, western, jav):
-
+    def __init__(self, ex, western, jav):
+        self.ex = ex
         self.western = western
         self.jav = jav
         self.nav_xp = XPath(
             '//section/div[@class="container"]//ul[@class="pagination-list"]/li'
             '/a[contains(@class, "is-current") and normalize-space()=$page]')
 
-    def get_tree(self, url: str, page: int):
-
-        tree = html_fromstring(_request(f"{url}?page={page}").content)
-        if self.nav_xp(tree, page=page):
+    def get_tree(self, url: str, i: int):
+        tree = html_fromstring(_request(url, params={"page": i}).content)
+        if self.nav_xp(tree, page=i):
             return tree
-        raise LastPageReached(page)
+        raise LastPageReached(i)
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
-
-        config = self.western
-        result = self._scrape(
-            base=config["domain"],
-            paths=config["page"],
-            xpath=('//div[@id="series"]//div[@class="box"]'
-                   '/a[@title and strong and span]'),
-            step=100,
-        )
         matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
         searcher = re.compile(r"\d+").search
+        xpath = '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]'
 
-        for t in result:
+        for t in self._scrape(xpath, **self.western):
             title = t.findtext("strong").replace(" ", "").lower()
             if matcher(title):
                 try:
@@ -147,236 +128,41 @@ class JavDBScraper(Scraper):
                     pass
 
     def get_id(self) -> Iterator[str]:
-
-        config = self.jav
-        return self._scrape(
-            base=config["domain"],
-            paths=config["page"],
-            xpath=('.//div[@id="videos"]//a[@class="box"]'
-                   '/div[@class="uid"]/text()'),
-            step=100,
-        )
+        xpath = './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()'
+        return self._scrape(xpath, **self.jav)
 
 
 class OnlineJsonScraper:
+
+    __slots__ = ("ex", "config")
+
+    def __init__(self, ex, config: List[str]) -> None:
+        self.ex = ex
+        self.config = config
+
+    def get_id(self) -> Iterable[str]:
+        print("Downloading online json...", file=STDERR)
+        for response in self.ex.map(_request, self.config):
+            yield from response.json()
+
+
+class LocalJSONLoader:
+
+    __slots__ = "config"
 
     def __init__(self, config: List[str]) -> None:
         self.config = config
 
     def get_id(self) -> Iterable[str]:
-
-        print("Downloading online json...", file=sys.stderr)
-        for url in self.config:
-            yield from _request(url).json()
-
-
-class LocalJSONLoader:
-
-    def __init__(self, config: List[str]) -> None:
-        self.filelist = config
-
-    def get_id(self) -> List[str]:
-
-        print("Reading local json...", file=sys.stderr)
-        for path in self.filelist:
+        print("Reading local json...", file=STDERR)
+        for path in self.config:
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (OSError, ValueError) as e:
-                print(e, file=sys.stderr)
+                print(e, file=STDERR)
             else:
                 yield from data
-
-
-class Builder:
-
-    def __init__(self, scrapers: List[Scraper], regex_file: str,
-                 keyword_max: int, prefix_max: int) -> None:
-
-        self._scrapers = scrapers
-        self._regex_file = Path(regex_file)
-        self._datafile = Path("data.yaml")
-        self._keyword_max = keyword_max
-        self._prefix_max = prefix_max
-        self._custom = self._load_custom()
-
-    def from_web(self):
-
-        data = {
-            "keyword": self._fetch_keyword(),
-            "prefix": self._fetch_prefix(),
-        }
-        with open(self._datafile, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, sort_keys=False, Dumper=yaml.CDumper)
-        return self._build(data)
-
-    def from_cache(self):
-
-        try:
-            with open(self._datafile, "r", encoding="utf-8") as f:
-                data = yaml.load(f, Loader=yaml.CLoader)
-        except (OSError, ValueError) as e:
-            sys.exit(e)
-        return self._build(data)
-
-    def _load_custom(self) -> Dict[str, List[str]]:
-
-        try:
-            with open("custom.yaml", "r+", encoding="utf-8") as f:
-                a = yaml.load(f, Loader=yaml.CLoader)
-                b = dict(zip(a, map(self._sort_customlist, a.values())))
-                if a != b:
-                    a = b
-                    f.seek(0)
-                    yaml.dump(a, f, sort_keys=False, Dumper=yaml.CDumper)
-                    f.truncate()
-        except FileNotFoundError:
-            a = {
-                "keyword whitelist": [],
-                "keyword blacklist": [],
-                "prefix whitelist": [],
-                "prefix blacklist": [],
-            }
-            with open("custom.yaml", "w", encoding="utf-8") as f:
-                yaml.dump(a, f, sort_keys=False, Dumper=yaml.CDumper)
-        return a
-
-    def _build(self, data: Dict[str, dict]):
-
-        keyword = self._build_regex(
-            name="keyword",
-            data=data,
-            omitOuterParen=True,
-        )
-        prefix = self._build_regex(
-            name="prefix",
-            data=data,
-            omitOuterParen=False,
-            filterlist=(keyword,),
-        )
-
-        print("-" * 50, file=sys.stderr)
-        if not (keyword and prefix):
-            return
-
-        regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
-        self._update_file(self._regex_file, regex)
-        return regex
-
-    def _build_regex(self,
-                     name: str,
-                     data: Dict[str, dict],
-                     omitOuterParen: bool,
-                     filterlist: Tuple[str] = ()) -> str:
-
-        print(f" {name.upper()} ".center(50, "-"), file=sys.stderr)
-        data = data[name]
-        print(f"Entry: {sum(data.values())}, {name}: {len(data)}",
-              file=sys.stderr)
-
-        words = sorted(data, key=data.get, reverse=True)
-        lo = getattr(self, f"_{name}_max")
-        hi = len(words)
-        if 0 < lo < hi:
-            x = data[words[lo]]
-            while lo < hi:
-                mid = (lo + hi) // 2
-                if x > data[words[mid]]:
-                    hi = mid
-                else:
-                    lo = mid + 1
-            words = words[:lo]
-
-        print("Cut: {} (frequency: {})".format(
-            len(words), data[words[-1]] if words else None),
-              file=sys.stderr)
-
-        whitelist = self._custom.get(name + " whitelist", ())
-        blacklist = self._custom.get(name + " blacklist", ())
-        regex = chain(whitelist, blacklist, filterlist)
-        regex = re.compile("|".join(regex)).fullmatch
-        words[:] = filterfalse(regex, words)
-        words.extend(whitelist)
-        words.sort()
-
-        print(f"Final: {len(words)}", file=sys.stderr)
-
-        regen = Regen(words)
-        regex = regen.to_regex(omitOuterParen=omitOuterParen)
-
-        concat = "|".join(words)
-        if not omitOuterParen and len(words) > 1:
-            concat = f"({concat})"
-
-        length = len(regex)
-        diff = length - len(concat)
-        if diff > 0:
-            print(
-                f"Computed regex is {diff} characters "
-                "longer than concatenation, use the latter.",
-                file=sys.stderr)
-            regex = concat
-        else:
-            regen.raise_for_verify()
-            print(f"Regex length: {length} ({diff})", file=sys.stderr)
-
-        return regex
-
-    def _fetch_keyword(self) -> Dict[str, int]:
-
-        d = {}
-        setdefault = d.setdefault
-        freq = get_freq_words()
-
-        for s in self._scrapers:
-            if not hasattr(s, "get_keyword"):
-                continue
-            for k, v in s.get_keyword():
-                if k not in freq and setdefault(k, v) < v:
-                    d[k] = v
-
-        return self._sort_dict_by_val(d)
-
-    def _fetch_prefix(self) -> Dict[str, int]:
-
-        d = defaultdict(set)
-        r = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
-
-        for s in self._scrapers:
-            for m in filter(None, map(r, map(str.lower, s.get_id()))):
-                d[m[1]].add(int(m[2]))
-
-        return self._sort_dict_by_val(zip(d, map(len, d.values())))
-
-    @staticmethod
-    def _sort_customlist(a: list):
-        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
-
-    @staticmethod
-    def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]]):
-        """Sort dictionary or 2-tuple iterable by key, largest first."""
-        d = sorted(d.items() if isinstance(d, dict) else d)
-        d.sort(key=itemgetter(1), reverse=True)
-        return dict(d)
-
-    @staticmethod
-    def _update_file(file: Path, content: str):
-
-        if not content.endswith("\n"):
-            content += "\n"
-        try:
-            with open(file, "r+", encoding="utf-8") as f:
-                old = f.read()
-                if old != content:
-                    f.seek(0)
-                    f.write(content)
-                    f.truncate()
-                    print(f"Update: {file}", file=sys.stderr)
-        except FileNotFoundError:
-            file.parent.mkdir(parents=True, exist_ok=True)
-            with open(file, mode="w", encoding="utf-8") as f:
-                f.write(content)
-            print(f"Create: {file}", file=sys.stderr)
 
 
 class MTeamCollector:
@@ -386,12 +172,11 @@ class MTeamCollector:
     def __init__(self, *, username: str, password: str, page_max: int,
                  cache_dir: str, av_page: str, non_av_page: str) -> None:
 
-        cache_dir = op.normpath(cache_dir)
         self._cache_dirs = (
             op.join(cache_dir, "non_av"),
             op.join(cache_dir, "av"),
         )
-        self._pages = (
+        self._urls = (
             urljoin(self.DOMAIN, non_av_page),
             urljoin(self.DOMAIN, av_page),
         )
@@ -413,26 +198,24 @@ class MTeamCollector:
 
     def from_web(self, is_av: bool) -> Iterator[str]:
 
-        url = self._pages[is_av]
-        cache = self._cache_dirs[is_av]
-
-        matcher = re.compile(r"\bid=([0-9]+)").search
-        xpath = XPath(
-            '//form[@id="form_torrent"]//table[@class="torrentname"]'
-            '/descendant::a[contains(@href, "download.php?")][1]/@href',
-            smart_strings=False)
-
+        url = self._urls[is_av]
+        cache_dir = self._cache_dirs[is_av]
         join = op.join
         exists = op.exists
         pool = {}
         idx = 0
         total = self._page_max
         step = frozenset(range(1, total, total // 10))
+        matcher = re.compile(r"\bid=([0-9]+)").search
+        xpath = XPath(
+            '//form[@id="form_torrent"]//table[@class="torrentname"]'
+            '/descendant::a[contains(@href, "download.php?")][1]/@href',
+            smart_strings=False)
 
         print(f"Scanning mteam ({total} pages)...",
               end="",
               flush=True,
-              file=sys.stderr)
+              file=STDERR)
         self._login()
 
         with ThreadPoolExecutor() as ex:
@@ -443,11 +226,11 @@ class MTeamCollector:
 
                 idx += 1
                 if idx in step:
-                    print(f"{idx}..", end="", flush=True, file=sys.stderr)
+                    print(f"{idx}..", end="", flush=True, file=STDERR)
 
                 for link in xpath(html_fromstring(ft.result().content)):
                     try:
-                        path = join(cache, matcher(link)[1] + ".txt")
+                        path = join(cache_dir, matcher(link)[1] + ".txt")
                     except TypeError:
                         continue
                     if exists(path):
@@ -455,17 +238,17 @@ class MTeamCollector:
                     else:
                         url = urljoin(self.DOMAIN, link)
                         pool[ex.submit(_request, url)] = url, path
-            print(total, file=sys.stderr)
+            print(total, file=STDERR)
 
             for ft in as_completed(pool):
                 url, path = pool[ft]
-                print(f"Downloading: {url}", file=sys.stderr)
+                print(f"Downloading: {url}", file=STDERR)
                 try:
                     self._parse_torrent(ft.result().content, path)
                 except requests.RequestException as e:
-                    print(e, file=sys.stderr)
+                    print(e, file=STDERR)
                 except Exception as e:
-                    print(e, file=sys.stderr)
+                    print(e, file=STDERR)
                     try:
                         os.unlink(path)
                     except OSError:
@@ -484,7 +267,7 @@ class MTeamCollector:
                 headers={"referer": self.DOMAIN + "/login.php"},
             )
             res.raise_for_status()
-            res = session.head(self._pages[0], allow_redirects=True)
+            res = session.head(self._urls[0], allow_redirects=True)
             if "/login.php" in res.url:
                 raise requests.RequestException("invalid credentials")
         except requests.RequestException as e:
@@ -512,7 +295,7 @@ class MTeamCollector:
                         "transmission-show not found. It is recommended to "
                         "install transmission-show to handle more torrents.\n"
                         "In Ubuntu, try: 'sudo apt install transmission-cli'",
-                        file=sys.stderr)
+                        file=STDERR)
                     self._has_transmission = False
                     raise e
 
@@ -540,18 +323,223 @@ class MTeamCollector:
                 f.writelines(i.lower() + "\n" for i in files)
 
 
-class Analyzer:
+class Builder:
 
-    def __init__(self, *, regex_file: str, mteam: MTeamCollector) -> None:
+    def __init__(self, config: dict) -> None:
+
+        self._config = config
+        self._regex_file = config["regex_file"]
+        self._keyword_max = config["keyword_max"]
+        self._prefix_max = config["prefix_max"]
+        self._datafile = "data.yaml"
+        self._customfile = "custom.yaml"
+
+    def from_web(self):
+
+        config = self._config
+        with ThreadPoolExecutor() as ex:
+            scrapers = (
+                JavBusScraper(ex, **config["javbus"]),
+                JavDBScraper(ex, **config["javdb"]),
+                OnlineJsonScraper(ex, config["online_json"]),
+                LocalJSONLoader(config["local_json"]),
+            )
+            data = {
+                "keyword": self._scrape_keyword(scrapers),
+                "prefix": self._scrape_prefix(scrapers),
+            }
+        with open(self._datafile, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, Dumper=yaml.CDumper, sort_keys=False)
+        return self._build(data)
+
+    def from_cache(self):
 
         try:
-            with open(regex_file, "r", encoding="utf-8") as f:
+            with open(self._datafile, "r", encoding="utf-8") as f:
+                data = yaml.load(f, Loader=yaml.CLoader)
+        except (OSError, ValueError) as e:
+            sys.exit(e)
+        return self._build(data)
+
+    def _build(self, data: Dict[str, dict]):
+
+        custom = self._load_custom()
+        keyword = self._build_regex(
+            name="keyword",
+            data=data,
+            custom=custom,
+            omitOuterParen=True,
+        )
+        prefix = self._build_regex(
+            name="prefix",
+            data=data,
+            custom=custom,
+            omitOuterParen=False,
+            filterlist=(keyword,),
+        )
+
+        print("-" * 50, file=STDERR)
+        if not (keyword and prefix):
+            return
+
+        regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
+        self._update_file(self._regex_file, regex)
+        return regex
+
+    def _build_regex(self,
+                     name: str,
+                     data: Dict[str, dict],
+                     custom: Dict[str, List[str]],
+                     omitOuterParen: bool,
+                     filterlist: Tuple[str] = None) -> str:
+
+        print(f" {name.upper()} ".center(50, "-"), file=STDERR)
+        data = data[name]
+        total = sum(data.values())
+        print(f"Entry: {total}, {name}: {len(data)}", file=STDERR)
+
+        words = sorted(data, key=data.get, reverse=True)
+        lo = getattr(self, f"_{name}_max")
+        hi = len(words)
+        if 0 < lo < hi:
+            x = data[words[lo]]
+            while lo < hi:
+                mid = (lo + hi) // 2
+                if x > data[words[mid]]:
+                    hi = mid
+                else:
+                    lo = mid + 1
+            words = words[:lo]
+
+        print("Cut: {}, frequency: {}, coverage: {:.1%}".format(
+            len(words),
+            data[words[-1]] if words else None,
+            sum(map(data.get, words)) / total,
+        ),
+              file=STDERR)
+
+        whitelist = custom.get(name + " whitelist", ())
+        blacklist = custom.get(name + " blacklist", ())
+        regex = chain(whitelist, blacklist, filterlist or ())
+        regex = re.compile("|".join(regex)).fullmatch
+        words[:] = filterfalse(regex, words)
+        words.extend(whitelist)
+        words.sort()
+
+        print(f"Final: {len(words)}", file=STDERR)
+
+        regen = Regen(words)
+        regex = regen.to_regex(omitOuterParen=omitOuterParen)
+
+        concat = "|".join(words)
+        if not omitOuterParen and len(words) > 1:
+            concat = f"({concat})"
+
+        length = len(regex)
+        diff = length - len(concat)
+        if diff > 0:
+            print(
+                f"Computed regex is {diff} characters "
+                "longer than concatenation, use the latter.",
+                file=STDERR)
+            regex = concat
+        else:
+            regen.raise_for_verify()
+            print(f"Regex length: {length} ({diff})", file=STDERR)
+
+        return regex
+
+    def _scrape_keyword(self, scrapers) -> Dict[str, int]:
+
+        d = {}
+        setdefault = d.setdefault
+        freq = get_freq_words()
+
+        for s in scrapers:
+            if not hasattr(s, "get_keyword"):
+                continue
+            for k, v in s.get_keyword():
+                if k not in freq and setdefault(k, v) < v:
+                    d[k] = v
+
+        return self._sort_dict_by_val(d)
+
+    def _scrape_prefix(self, scrapers) -> Dict[str, int]:
+
+        d = defaultdict(set)
+        r = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
+
+        for s in scrapers:
+            for m in filter(None, map(r, map(str.lower, s.get_id()))):
+                d[m[1]].add(int(m[2]))
+
+        return self._sort_dict_by_val(zip(d, map(len, d.values())))
+
+    def _load_custom(self) -> Dict[str, List[str]]:
+
+        try:
+            with open(self._customfile, "r+", encoding="utf-8") as f:
+                a = yaml.load(f, Loader=yaml.CLoader)
+                b = {k: self._sort_custom(v) for k, v in a.items()}
+                if a != b:
+                    a = b
+                    f.seek(0)
+                    yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
+                    f.truncate()
+        except FileNotFoundError:
+            a = {
+                "keyword whitelist": [],
+                "keyword blacklist": [],
+                "prefix whitelist": [],
+                "prefix blacklist": [],
+            }
+            with open(self._customfile, "w", encoding="utf-8") as f:
+                yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
+        return a
+
+    @staticmethod
+    def _sort_custom(a: list):
+        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
+
+    @staticmethod
+    def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]]):
+        """Sort dictionary or 2-tuple iterable by key, largest first."""
+        d = sorted(d.items() if isinstance(d, dict) else d)
+        d.sort(key=itemgetter(1), reverse=True)
+        return dict(d)
+
+    @staticmethod
+    def _update_file(file: str, content: str):
+
+        if not content.endswith("\n"):
+            content += "\n"
+        try:
+            with open(file, "r+", encoding="utf-8") as f:
+                old = f.read()
+                if old != content:
+                    f.seek(0)
+                    f.write(content)
+                    f.truncate()
+                    print(f"Update: {file}", file=STDERR)
+        except FileNotFoundError:
+            os.makedirs(op.dirname(file), exist_ok=True)
+            with open(file, mode="w", encoding="utf-8") as f:
+                f.write(content)
+            print(f"Create: {file}", file=STDERR)
+
+
+class Analyzer:
+
+    def __init__(self, config: dict) -> None:
+
+        try:
+            with open(config["regex_file"], "r", encoding="utf-8") as f:
                 regex = f.readline().strip()
                 if f.read():
                     raise ValueError("regex file should contain only one line")
 
             if "(?" in regex:
-                raise ValueError("regex should not have special group")
+                raise ValueError("regex should have no special groups")
 
             i = regex.index("(", 1)
             regex = "{}({}".format(regex[:i].replace("(", "(?:"),
@@ -563,12 +551,11 @@ class Analyzer:
         self._filter = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
-
-        self._mteam = mteam
+        self._mteam = MTeamCollector(**config["mteam"])
 
     def analyze_av(self, local: bool = False):
 
-        print("Matching test begins...", file=sys.stderr)
+        print("Matching test begins...", file=STDERR)
 
         total = unmatched = 0
         report_file = "unmatch_report.txt"
@@ -590,6 +577,7 @@ class Analyzer:
         with ProcessPoolExecutor() as ex, open(raw_file, "w",
                                                encoding="utf-8") as f:
 
+            freq_words = ex.submit(get_freq_words)
             for content in ex.map(self._match_av, paths, chunksize=100):
 
                 total += 1
@@ -609,9 +597,10 @@ class Analyzer:
                     word_count.update(tmp)
                     tmp.clear()
 
-        freq_words = get_freq_words()
+            freq_words = freq_words.result()
+
         brief = self._get_brief("Match", total, total - unmatched)
-        print(brief, file=sys.stderr)
+        print(brief, file=STDERR)
 
         prefixes = [(i, len(v), k, set(v))
                     for k, v in groups.items()
@@ -633,11 +622,11 @@ class Analyzer:
             f.write("{:>6}  {}\n{:->80}\n".format("uniq", "word", ""))
             f.writelines(f"{i:6d}  {j}\n" for i, j in words)
 
-        print(f"Result saved to: {report_file}", file=sys.stderr)
+        print(f"Result saved to: {report_file}", file=STDERR)
 
     def analyze_non_av(self, local: bool = False):
 
-        print("Mismatching test begins...", file=sys.stderr)
+        print("Mismatching test begins...", file=STDERR)
 
         total = mismatched = 0
         report_file = "mismatch_report.txt"
@@ -668,7 +657,7 @@ class Analyzer:
                     tmp.clear()
 
         brief = self._get_brief("Mismatch", total, mismatched)
-        print(brief, file=sys.stderr)
+        print(brief, file=STDERR)
 
         result = [(word_count[k], len(v), k, set(v)) for k, v in groups.items()]
         result.sort(key=lambda t: (-t[0], -t[1], t[2]))
@@ -678,7 +667,7 @@ class Analyzer:
             f.write("\n\n")
             f.writelines(self._format_report(result))
 
-        print(f"Result saved to: {report_file}", file=sys.stderr)
+        print(f"Result saved to: {report_file}", file=STDERR)
 
     def _match_av(self, path: str) -> Optional[str]:
 
@@ -737,16 +726,27 @@ def get_freq_words():
     """Get wordlist of the top 3000 English words which is longer than 3
     letters."""
 
-    result = _request(
-        "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    ).text
-    result = islice(
-        re.finditer(r"^\s*([A-Za-z]{3,})\s*$", result, flags=re.MULTILINE),
-        3000)
-    return frozenset(map(str.lower, map(itemgetter(1), result)))
+    url = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+    result = re.finditer(r"^\s*([A-Za-z]{3,})\s*$", _request(url).text, re.M)
+    return frozenset(map(str.lower, map(itemgetter(1), islice(result, 3000))))
 
 
 def parse_config(configfile: str) -> dict:
+
+    try:
+        with open(configfile, "r", encoding="utf-8") as f:
+            config = yaml.load(f, Loader=yaml.CLoader)
+        a = op.normpath
+        b = op.expanduser
+        config["regex_file"] = a(b(config["regex_file"]))
+        config["local_json"] = tuple(a(b(p)) for p in config["local_json"])
+        config["mteam"]["cache_dir"] = a(b(config["mteam"]["cache_dir"]))
+    except FileNotFoundError:
+        pass
+    except (KeyError, ValueError) as e:
+        sys.exit(f"Error in config file: {e}")
+    else:
+        return config
 
     default = {
         "regex_file": "regex.txt",
@@ -757,16 +757,16 @@ def parse_config(configfile: str) -> dict:
         "javbus": {
             "western": {
                 "domain": "https://www.javbus.org",
-                "page": ["/page", "/studio/1", "/studio/2", "/studio/3", "/studio/4"],
+                "pages": ["/page", "/studio/1", "/studio/2", "/studio/3", "/studio/4"],
             },
             "jav": {
                 "domain": "https://www.javbus.com",
-                "page": ["/page", "/uncensored/page", "/genre/hd", "/uncensored/genre/hd"],
+                "pages": ["/page", "/uncensored/page", "/genre/hd", "/uncensored/genre/hd"],
             },
         },
         "javdb": {
-            "western": {"domain": "https://javdb.com", "page": ["/series/western"]},
-            "jav": {"domain": "https://javdb.com", "page": ["/uncensored", "/"]},
+            "western": {"domain": "https://javdb.com", "pages": ["/series/western"]},
+            "jav": {"domain": "https://javdb.com", "pages": ["/uncensored", "/"]},
         },
         "mteam": {
             "username": "",
@@ -778,20 +778,9 @@ def parse_config(configfile: str) -> dict:
         },
     } # yapf: disable
 
-    try:
-        with open(configfile, "r", encoding="utf-8") as f:
-            config = yaml.load(f, Loader=yaml.CLoader)
-        f = op.expanduser
-        config["regex_file"] = f(config["regex_file"])
-        config["local_json"][:] = map(f, config["local_json"])
-        config["mteam"]["cache_dir"] = f(config["mteam"]["cache_dir"])
-        return config
-    except FileNotFoundError:
-        with open(configfile, "w", encoding="utf-8") as f:
-            yaml.dump(default, f, sort_keys=False, Dumper=yaml.CDumper)
-        sys.exit(f"Please edit {configfile} before running me again.")
-    except (KeyError, ValueError) as e:
-        sys.exit(f"Error in config file: {e}")
+    with open(configfile, "w", encoding="utf-8") as f:
+        yaml.dump(default, f, Dumper=yaml.CDumper, sort_keys=False)
+    sys.exit(f"Please edit {configfile} before running me again.")
 
 
 def parse_arguments():
@@ -875,7 +864,9 @@ def main():
 
     config = parse_config("config.yaml")
     args = parse_arguments()
-    regex_file = args.file or config["regex_file"]
+
+    if args.file:
+        config["regex_file"] = args.file
 
     if args.mode == "build":
 
@@ -884,38 +875,24 @@ def main():
         if args.prefix_max is not None:
             config["prefix_max"] = args.prefix_max
 
-        scrapers = (
-            JavBusScraper(**config["javbus"]),
-            JavDBScraper(**config["javdb"]),
-            OnlineJsonScraper(config["online_json"]),
-            LocalJSONLoader(config["local_json"]),
-        )
-        builder = Builder(
-            scrapers=scrapers,
-            regex_file=regex_file,
-            keyword_max=config["keyword_max"],
-            prefix_max=config["prefix_max"],
-        )
+        builder = Builder(config)
         if args.local:
             regex = builder.from_cache()
         else:
             regex = builder.from_web()
+
         if regex:
-            print(f"Result: {len(regex)} chars", file=sys.stderr)
+            print(f"Result: {len(regex)} chars", file=STDERR)
             print(regex)
         else:
-            print("Generating regex failed.", file=sys.stderr)
+            print("Generating regex failed.", file=STDERR)
 
     else:
 
         if args.mteam_max is not None:
             config["mteam"]["page_max"] = args.mteam_max
 
-        analyzer = Analyzer(
-            regex_file=regex_file,
-            mteam=MTeamCollector(**config["mteam"]),
-        )
-
+        analyzer = Analyzer(config)
         if args.mode == "test_match":
             analyzer.analyze_av(args.local)
         else:
