@@ -333,7 +333,7 @@ class Builder:
         self._datafile = "data.yaml"
         self._customfile = "custom.yaml"
 
-    def from_web(self):
+    def from_web(self) -> Optional[str]:
 
         config = self._config
         with ThreadPoolExecutor() as ex:
@@ -351,7 +351,7 @@ class Builder:
             yaml.dump(data, f, Dumper=yaml.CDumper, sort_keys=False)
         return self._build(data)
 
-    def from_cache(self):
+    def from_cache(self) -> Optional[str]:
 
         try:
             with open(self._datafile, "r", encoding="utf-8") as f:
@@ -464,8 +464,7 @@ class Builder:
             for k, v in s.get_keyword():
                 if k not in freq and setdefault(k, v) < v:
                     d[k] = v
-
-        return self._sort_dict_by_val(d)
+        return self._sort_scrape(d.items())
 
     def _scrape_prefix(self, scrapers) -> Dict[str, int]:
 
@@ -475,8 +474,7 @@ class Builder:
         for s in scrapers:
             for m in filter(None, map(r, map(str.lower, s.get_id()))):
                 d[m[1]].add(int(m[2]))
-
-        return self._sort_dict_by_val(zip(d, map(len, d.values())))
+        return self._sort_scrape(zip(d, map(len, d.values())))
 
     def _load_custom(self) -> Dict[str, List[str]]:
 
@@ -501,19 +499,17 @@ class Builder:
         return a
 
     @staticmethod
-    def _sort_custom(a: list):
+    def _sort_custom(a: List[str]):
         return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
 
     @staticmethod
-    def _sort_dict_by_val(d: Union[Dict, Iterable[Tuple]]):
-        """Sort dictionary or 2-tuple iterable by key, largest first."""
-        d = sorted(d.items() if isinstance(d, dict) else d)
+    def _sort_scrape(d: Iterable[Tuple[str, int]]):
+        d = sorted(d)
         d.sort(key=itemgetter(1), reverse=True)
         return dict(d)
 
     @staticmethod
     def _update_file(file: str, content: str):
-
         if not content.endswith("\n"):
             content += "\n"
         try:

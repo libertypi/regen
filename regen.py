@@ -67,18 +67,15 @@ class Parser:
     def parse(self, _input: Union[str, List[str]]) -> Iterator[Token]:
         """Convert a regular expression to a tokenset."""
 
-        if not isinstance(_input, list):
+        if isinstance(_input, str):
             _input = _split_token(_input)
-
         if _not_special(_input):  # Not regex we can handle
             yield tuple(_input)
             return
-
         if self.index != 0:
             raise RuntimeError("Parser is not idle.")
 
         self.token = _input
-
         result = self.result
         hold_append = self.hold.append
         eat = self._eat
@@ -86,24 +83,18 @@ class Parser:
 
         char = eat()
         while char:
-
             if char in _specials:
-
                 if char == "|":
                     self._concat_hold()
                     yield from map(tuple, result)
-                    result[:] = [[]]
-
+                    result[:] = ([],)
                 elif char == "[":
                     self._charsetStrategy()
-
                 elif char == "(":
                     self._parenStrategy()
-
                 else:
                     raise ValueError(
-                        f"Invalid character '{char}': '{self.string}'")
-
+                        f"Invalid character '{char}' in '{self.string}'")
             else:
                 suffix = eatsuffix()
                 if not suffix:
@@ -113,12 +104,11 @@ class Parser:
                     result.extend([*x, char] for x in tuple(result))
                 else:
                     hold_append(char + suffix)
-
             char = eat()
 
         self._concat_hold()
         yield from map(tuple, result)
-        result[:] = [[]]
+        result[:] = ([],)
         self.index = 0
         self.token = None
 
@@ -162,7 +152,6 @@ class Parser:
                 raise ValueError(f"Bad character set: {self.string}")
 
         suffix = self._eat_suffix()
-
         if not suffix:
             if len(charset) > 1:
                 result[:] = ([*x, *hold, y] for x in result for y in charset)
