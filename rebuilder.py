@@ -548,11 +548,11 @@ class Analyzer:
             i = regex.index("(", 1)
             regex = "{}({}".format(regex[:i].replace("(", "(?:"),
                                    regex[i + 1:].replace("(", "(?:"))
-            self._matcher = re.compile(regex, flags=re.M).search
+            self.matcher = re.compile(regex, flags=re.M).search
         except (OSError, ValueError) as e:
             sys.exit(e)
 
-        self._filter = re.compile(
+        self.extfilter = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
         self._mteam = MTeamCollector(**config["mteam"])
@@ -564,7 +564,7 @@ class Analyzer:
         total = count = 0
         report_file = "av_report.txt"
         raw_file = "mismatch_raw.txt"
-        groups = defaultdict(list)
+        groups = defaultdict(set)
         prefix_count = Counter()
         word_count = Counter()
         tmp = set()
@@ -586,7 +586,7 @@ class Analyzer:
                     f.write("---\n")
                     f.write(content)
                     for string, prefix in prefix_finder(content):
-                        groups[prefix].append(string)
+                        groups[prefix].add(string)
                         tmp.add(prefix)
                     prefix_count.update(tmp)
                     tmp.clear()
@@ -595,15 +595,16 @@ class Analyzer:
                     tmp.clear()
             freq_words = freq_words.result()
 
-        result = [(i, len(v), k, set(v))
+        result = [(i, k, v)
                   for k, v in groups.items()
                   if (i := prefix_count[k]) >= 5 and k not in freq_words]
-        result.sort(key=lambda t: (-t[0], -t[1], t[2]))
+        words = [(i, k)
+                 for k, i in word_count.items()
+                 if i >= 5 and k not in freq_words]
 
-        words = [(v, k)
-                 for k, v in word_count.items()
-                 if v >= 5 and k not in freq_words]
-        words.sort(key=lambda t: (-t[0], t[1]))
+        f = lambda t: (-t[0], t[1])
+        result.sort(key=f)
+        words.sort(key=f)
 
         with open(report_file, "w", encoding="utf-8") as f:
             for line in self._format_report(total, "Failed", count,
@@ -611,21 +612,21 @@ class Analyzer:
                 print(line, end="")
                 f.write(line)
 
-            f.write("\n\nPotential Keywords:\n")
-            f.write(f'{"item":>6}  word\n{"-"*80}\n')
-            f.writelines(f"{i:6d}  {j}\n" for i, j in words)
+            f.write("\n\nPotential Keywords:\n"
+                    f'{"torrent":>7}  word\n{"-"*80}\n')
+            f.writelines(f"{i:7d}  {j}\n" for i, j in words)
 
         print(f"Result saved to: {report_file}", file=STDERR)
 
-    def analyze_non_av(self, local: bool = False):
+    def analyze_nonav(self, local: bool = False):
 
         print("Matching test begins with non-av torrents...", file=STDERR)
 
         total = count = 0
-        report_file = "non_av_report.txt"
+        report_file = "nonav_report.txt"
         word_searcher = re.compile(r"[a-z]+").search
 
-        groups = defaultdict(list)
+        groups = defaultdict(set)
         word_count = Counter()
         tmp = set()
         paths = self._mteam.from_cache if local else self._mteam.from_web
@@ -641,13 +642,13 @@ class Analyzer:
                             word = word_searcher(string)[0]
                         except TypeError:
                             word = string
-                        groups[word].append(string)
+                        groups[word].add(string)
                         tmp.add(word)
                     word_count.update(tmp)
                     tmp.clear()
 
-        result = [(word_count[k], len(v), k, set(v)) for k, v in groups.items()]
-        result.sort(key=lambda t: (-t[0], -t[1], t[2]))
+        result = [(word_count[k], k, v) for k, v in groups.items()]
+        result.sort(key=lambda t: (-t[0], t[1]))
 
         with open(report_file, "w", encoding="utf-8") as f:
             for line in self._format_report(total, "Matched", count,
@@ -658,14 +659,14 @@ class Analyzer:
 
     def _match_av(self, path: str) -> Optional[str]:
         with open(path, "r", encoding="utf-8") as f:
-            a, b = tee(filter(self._filter, f))
-            if not any(map(self._matcher, a)):
+            a, b = tee(filter(self.extfilter, f))
+            if not any(map(self.matcher, a)):
                 return "".join(b)
 
     def _match_nonav(self, path: str) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:
             return tuple(
-                m[1] for m in map(self._matcher, filter(self._filter, f)) if m)
+                m[1] for m in map(self.matcher, filter(self.extfilter, f)) if m)
 
     def _format_report(self, total, name, count, title, result):
         r = reprlib.repr
@@ -673,9 +674,9 @@ class Analyzer:
             f"Regex file: {self.regex_file}\n"
             f"Total: {total}, {name}: {count}, Percentage: {count / total:.2%}\n\n"
             f"{title}:\n"
-            f'{"item":>6}  {"occur":>6}  {"word":16}strings\n{"-" * 80}\n')
-        for i, j, k, s in result:
-            yield f"{i:6d}  {j:6d}  {k:16}{r(s)[1:-1]}\n"
+            f'{"torrent":>7}  {"word":16}strings\n{"-" * 80}\n')
+        for i, k, s in result:
+            yield f"{i:7d}  {k:16}{r(s)[1:-1]}\n"
 
 
 def _init_session():
@@ -873,7 +874,7 @@ def main():
         if args.mode == "test_match":
             analyzer.analyze_av(args.local)
         else:
-            analyzer.analyze_non_av(args.local)
+            analyzer.analyze_nonav(args.local)
 
 
 session = _init_session()
