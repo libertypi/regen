@@ -561,10 +561,10 @@ class Analyzer:
 
         print("Matching test begins with av torrents...", file=STDERR)
 
-        total = count = 0
         report_file = "av_report.txt"
         raw_file = "mismatch_raw.txt"
-        groups = defaultdict(set)
+        total = count = 0
+        result = defaultdict(set)
         prefix_count = Counter()
         word_count = Counter()
         tmp = set()
@@ -586,7 +586,7 @@ class Analyzer:
                     f.write("---\n")
                     f.write(content)
                     for string, prefix in prefix_finder(content):
-                        groups[prefix].add(string)
+                        result[prefix].add(string)
                         tmp.add(prefix)
                     prefix_count.update(tmp)
                     tmp.clear()
@@ -596,7 +596,7 @@ class Analyzer:
             freq_words = freq_words.result()
 
         result = [(i, k, v)
-                  for k, v in groups.items()
+                  for k, v in result.items()
                   if (i := prefix_count[k]) >= 5 and k not in freq_words]
         words = [(i, k)
                  for k, i in word_count.items()
@@ -613,7 +613,7 @@ class Analyzer:
                 f.write(line)
 
             f.write("\n\nPotential Keywords:\n"
-                    f'{"torrent":>7}  word\n{"-"*80}\n')
+                    f'{"torrent":>7}  word\n{"-" * 80}\n')
             f.writelines(f"{i:7d}  {j}\n" for i, j in words)
 
         print(f"Result saved to: {report_file}", file=STDERR)
@@ -622,11 +622,11 @@ class Analyzer:
 
         print("Matching test begins with non-av torrents...", file=STDERR)
 
-        total = count = 0
         report_file = "nonav_report.txt"
+        total = count = 0
         word_searcher = re.compile(r"[a-z]+").search
 
-        groups = defaultdict(set)
+        result = defaultdict(set)
         word_count = Counter()
         tmp = set()
         paths = self._mteam.from_cache if local else self._mteam.from_web
@@ -642,12 +642,12 @@ class Analyzer:
                             word = word_searcher(string)[0]
                         except TypeError:
                             word = string
-                        groups[word].add(string)
+                        result[word].add(string)
                         tmp.add(word)
                     word_count.update(tmp)
                     tmp.clear()
 
-        result = [(word_count[k], k, v) for k, v in groups.items()]
+        result = [(word_count[k], k, v) for k, v in result.items()]
         result.sort(key=lambda t: (-t[0], t[1]))
 
         with open(report_file, "w", encoding="utf-8") as f:
@@ -768,7 +768,9 @@ def parse_config(configfile: str) -> dict:
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="The ultimate Regex builder.")
+
+    parser = argparse.ArgumentParser(
+        description="The ultimate Regex builder, by David Pi.")
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -839,15 +841,15 @@ def parse_arguments():
 
 def main():
 
+    args = parse_arguments()
+
     config = op.join(op.dirname(__file__), "builder")
     try:
         os.chdir(config)
     except FileNotFoundError:
         os.mkdir(config)
         os.chdir(config)
-
     config = parse_config("config.yaml")
-    args = parse_arguments()
 
     if args.file:
         config["regex_file"] = args.file
