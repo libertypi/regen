@@ -338,7 +338,7 @@ class Builder:
         self._regex_file = config["regex_file"]
         self._keyword_max = config["keyword_max"]
         self._prefix_max = config["prefix_max"]
-        self._datafile = "data.yaml"
+        self._datafile = "data.json"
         self._customfile = "custom.yaml"
 
     def from_web(self) -> Optional[str]:
@@ -356,14 +356,14 @@ class Builder:
                 "prefix": self._scrape_prefix(scrapers),
             }
         with open(self._datafile, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, Dumper=yaml.CDumper, sort_keys=False)
+            json.dump(data, f, indent=4)
         return self._build(data)
 
     def from_cache(self) -> Optional[str]:
 
         try:
             with open(self._datafile, "r", encoding="utf-8") as f:
-                data = yaml.load(f, Loader=yaml.CLoader)
+                data = json.load(f)
         except (OSError, ValueError) as e:
             sys.exit(e)
         return self._build(data)
