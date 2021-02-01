@@ -209,7 +209,7 @@ class MTeamCollector:
         pool = {}
         idx = 0
         total = self._page_max
-        step = frozenset(range(1, total, total // 10))
+        step = frozenset(range(1, total, (total // 10) or 1))
         matcher = re.compile(r"\bid=([0-9]+)").search
         xpath = XPath(
             '//form[@id="form_torrent"]//table[@class="torrentname"]'
@@ -252,7 +252,7 @@ class MTeamCollector:
                 except requests.RequestException as e:
                     print(e, file=STDERR)
                 except Exception as e:
-                    print(e, file=STDERR)
+                    print(f"Error: {e}", file=STDERR)
                     try:
                         os.unlink(path)
                     except OSError:
@@ -286,9 +286,9 @@ class MTeamCollector:
         except OSError:
             raise
         except Exception as e:
-            self._parse_torrent2(e, content, path)
+            self._parse_torrent2(content, path, e=e)
 
-    def _parse_torrent2(self, e: Exception, content: bytes, path: str):
+    def _parse_torrent2(self, content: bytes, path: str, e: Exception):
 
         torrent_file = path + ".torrent"
         try:
@@ -302,8 +302,8 @@ class MTeamCollector:
             ).stdout
         except FileNotFoundError:
             print(
-                "transmission-show not found. It is recommended to "
-                "install transmission-show to handle more torrents.\n"
+                "Error: transmission-show not found. It is recommended "
+                "to install transmission-show to handle more torrents.\n"
                 "In Ubuntu, try: 'sudo apt install transmission-cli'",
                 file=STDERR)
             self._parse_torrent2 = self._skip
@@ -321,9 +321,9 @@ class MTeamCollector:
             f.writelines(i.lower() + "\n" for i in files)
 
     @staticmethod
-    def _skip(*args):
-        if args:
-            raise args[0]
+    def _skip(*args, e: Exception = None):
+        if e is not None:
+            raise e
 
 
 class Builder:
