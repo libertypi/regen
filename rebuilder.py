@@ -17,7 +17,6 @@ from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
 
 import requests
-import yaml
 from lxml.etree import XPath
 from lxml.html import HtmlElement
 from lxml.html import fromstring as html_fromstring
@@ -189,8 +188,6 @@ class MTeamCollector:
         )
         self._page_max = page_max
         self._account = {"username": username, "password": password}
-        self._logined = False
-        self._has_transmission = None
 
         for cache_dir in self._cache_dirs:
             os.makedirs(cache_dir, exist_ok=True)
@@ -265,8 +262,6 @@ class MTeamCollector:
 
     def _login(self):
 
-        if self._logined:
-            return
         try:
             r = session.post(
                 url=self.DOMAIN + "/takelogin.php",
@@ -279,7 +274,7 @@ class MTeamCollector:
                 raise requests.RequestException("invalid credentials")
         except requests.RequestException as e:
             sys.exit(f"login failed: {e}")
-        self._logined = True
+        self._login = self._skip
 
     def _parse_torrent(self, content: bytes, path: str):
         """Parse a torrent, write file list to `path`."""
@@ -291,43 +286,44 @@ class MTeamCollector:
         except OSError:
             raise
         except Exception as e:
-            if not self._has_transmission:
-                if self._has_transmission is False:
-                    raise e
-                try:
-                    subprocess.run("transmission-show", capture_output=True)
-                    self._has_transmission = True
-                except FileNotFoundError:
-                    print(
-                        "transmission-show not found. It is recommended to "
-                        "install transmission-show to handle more torrents.\n"
-                        "In Ubuntu, try: 'sudo apt install transmission-cli'",
-                        file=STDERR)
-                    self._has_transmission = False
-                    raise e
+            self._parse_torrent2(e, content, path)
 
-            torrent_file = path + ".torrent"
+    def _parse_torrent2(self, e: Exception, content: bytes, path: str):
+
+        torrent_file = path + ".torrent"
+        try:
+            with open(torrent_file, "wb") as f:
+                f.write(content)
+            files = subprocess.run(
+                ("transmission-show", torrent_file),
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        except FileNotFoundError:
+            print(
+                "transmission-show not found. It is recommended to "
+                "install transmission-show to handle more torrents.\n"
+                "In Ubuntu, try: 'sudo apt install transmission-cli'",
+                file=STDERR)
+            self._parse_torrent2 = self._skip
+            raise e
+        finally:
             try:
-                with open(torrent_file, "wb") as f:
-                    f.write(content)
-                files = subprocess.run(
-                    ("transmission-show", torrent_file),
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                ).stdout
-            finally:
-                try:
-                    os.unlink(torrent_file)
-                except OSError:
-                    pass
+                os.unlink(torrent_file)
+            except OSError:
+                pass
+        spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
+        files = spliter.findall(files, files.index("\n\nFILES\n\n"))
+        if not files:
+            raise ValueError("torrent file seems empty")
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(i.lower() + "\n" for i in files)
 
-            spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
-            files = spliter.findall(files, files.index("\n\nFILES\n\n"))
-            if not files:
-                raise ValueError("torrent file seems empty")
-            with open(path, "w", encoding="utf-8") as f:
-                f.writelines(i.lower() + "\n" for i in files)
+    @staticmethod
+    def _skip(*args):
+        if args:
+            raise args[0]
 
 
 class Builder:
@@ -400,17 +396,14 @@ class Builder:
 
     def _build(self, data: Dict[str, dict]):
 
-        custom = self._load_custom()
         keyword = self._build_regex(
             name="keyword",
             data=data,
-            custom=custom,
             omitOuterParen=True,
         )
         prefix = self._build_regex(
             name="prefix",
             data=data,
-            custom=custom,
             omitOuterParen=False,
             filterlist=(keyword,),
         )
@@ -427,36 +420,9 @@ class Builder:
         print(regex)
         return regex
 
-    def _load_custom(self) -> Dict[str, List[str]]:
-
-        try:
-            with open(self._customfile, "r+", encoding="utf-8") as f:
-                a = yaml.load(f, Loader=yaml.CSafeLoader)
-                b = {k: self._sort_custom(v) for k, v in a.items()}
-                if a != b:
-                    a = b
-                    f.seek(0)
-                    yaml.dump(a, f, Dumper=yaml.CSafeDumper, sort_keys=False)
-                    f.truncate()
-        except FileNotFoundError:
-            a = {
-                "keyword whitelist": [],
-                "keyword blacklist": [],
-                "prefix whitelist": [],
-                "prefix blacklist": [],
-            }
-            with open(self._customfile, "w", encoding="utf-8") as f:
-                yaml.dump(a, f, Dumper=yaml.CSafeDumper, sort_keys=False)
-        return a
-
-    @staticmethod
-    def _sort_custom(a: List[str]):
-        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
-
     def _build_regex(self,
                      name: str,
                      data: Dict[str, dict],
-                     custom: Dict[str, List[str]],
                      omitOuterParen: bool,
                      filterlist: Tuple[str] = None) -> str:
 
@@ -477,27 +443,25 @@ class Builder:
                 else:
                     lo = mid + 1
             words = words[:lo]
+        if not words:
+            return
 
         print("Cut: {}, frequency: {}, coverage: {:.1%}".format(
-            len(words),
-            data[words[-1]] if words else None,
-            sum(map(data.get, words)) / total,
-        ),
+            len(words), data[words[-1]],
+            sum(map(data.get, words)) / total),
               file=STDERR)
 
-        whitelist = custom.get(name + " whitelist", ())
-        blacklist = custom.get(name + " blacklist", ())
+        whitelist = self._update_file(name + "_whitelist.txt")
+        blacklist = self._update_file(name + "_blacklist.txt")
         regex = chain(whitelist, blacklist, filterlist or ())
         regex = re.compile("|".join(regex)).fullmatch
         words[:] = filterfalse(regex, words)
         words.extend(whitelist)
         words.sort()
-
         print(f"Final: {len(words)}", file=STDERR)
 
         regen = Regen(words)
         regex = regen.to_regex(omitOuterParen=omitOuterParen)
-
         concat = "|".join(words)
         if not omitOuterParen and len(words) > 1:
             concat = f"({concat})"
@@ -516,23 +480,29 @@ class Builder:
 
         return regex
 
-    @staticmethod
-    def _update_file(file: str, content: str):
-        if not content.endswith("\n"):
-            content += "\n"
+    def _update_file(self, file: str, content: str = None) -> List[str]:
+
+        new = () if content is None else [content]
         try:
             with open(file, "r+", encoding="utf-8") as f:
-                old = f.read()
-                if old != content:
+                old = f.read().splitlines()
+                if not new:
+                    new = self._sort_custom(old)
+                if old != new:
                     f.seek(0)
-                    f.write(content)
+                    f.writelines(i + "\n" for i in new)
                     f.truncate()
                     print(f"Update: {file}", file=STDERR)
         except FileNotFoundError:
             os.makedirs(op.dirname(file), exist_ok=True)
             with open(file, mode="w", encoding="utf-8") as f:
-                f.write(content)
+                f.writelines(i + "\n" for i in new)
             print(f"Create: {file}", file=STDERR)
+        return new
+
+    @staticmethod
+    def _sort_custom(a: List[str]):
+        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
 
 
 class Analyzer:
@@ -565,8 +535,8 @@ class Analyzer:
 
         print("Matching test begins with av torrents...", file=STDERR)
 
-        report_file = "av_report.txt"
-        raw_file = "mismatch_raw.txt"
+        report_file = op.abspath("av_report.txt")
+        raw_file = op.abspath("mismatch_raw.txt")
         total = count = 0
         result = defaultdict(set)
         prefix_count = Counter()
@@ -626,7 +596,7 @@ class Analyzer:
 
         print("Matching test begins with non-av torrents...", file=STDERR)
 
-        report_file = "nonav_report.txt"
+        report_file = op.abspath("nonav_report.txt")
         total = count = 0
         word_searcher = re.compile(r"[a-z]+").search
 
@@ -723,7 +693,7 @@ def parse_config(configfile: str) -> dict:
 
     try:
         with open(configfile, "r", encoding="utf-8") as f:
-            config = yaml.load(f, Loader=yaml.CSafeLoader)
+            config = json.load(f)
         a = op.normpath
         b = op.expanduser
         config["regex_file"] = a(b(config["regex_file"]))
@@ -767,7 +737,7 @@ def parse_config(configfile: str) -> dict:
     } # yapf: disable
 
     with open(configfile, "w", encoding="utf-8") as f:
-        yaml.dump(default, f, Dumper=yaml.CSafeDumper, sort_keys=False)
+        json.dump(default, f, indent=4)
     sys.exit(f"Please edit {configfile} before running me again.")
 
 
@@ -853,7 +823,7 @@ def main():
     except FileNotFoundError:
         os.mkdir(config)
         os.chdir(config)
-    config = parse_config("config.yaml")
+    config = parse_config("config.json")
 
     if args.file:
         config["regex_file"] = args.file
