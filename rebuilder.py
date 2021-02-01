@@ -431,12 +431,12 @@ class Builder:
 
         try:
             with open(self._customfile, "r+", encoding="utf-8") as f:
-                a = yaml.load(f, Loader=yaml.CLoader)
+                a = yaml.load(f, Loader=yaml.CSafeLoader)
                 b = {k: self._sort_custom(v) for k, v in a.items()}
                 if a != b:
                     a = b
                     f.seek(0)
-                    yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
+                    yaml.dump(a, f, Dumper=yaml.CSafeDumper, sort_keys=False)
                     f.truncate()
         except FileNotFoundError:
             a = {
@@ -446,7 +446,7 @@ class Builder:
                 "prefix blacklist": [],
             }
             with open(self._customfile, "w", encoding="utf-8") as f:
-                yaml.dump(a, f, Dumper=yaml.CDumper, sort_keys=False)
+                yaml.dump(a, f, Dumper=yaml.CSafeDumper, sort_keys=False)
         return a
 
     @staticmethod
@@ -723,7 +723,7 @@ def parse_config(configfile: str) -> dict:
 
     try:
         with open(configfile, "r", encoding="utf-8") as f:
-            config = yaml.load(f, Loader=yaml.CLoader)
+            config = yaml.load(f, Loader=yaml.CSafeLoader)
         a = op.normpath
         b = op.expanduser
         config["regex_file"] = a(b(config["regex_file"]))
@@ -767,7 +767,7 @@ def parse_config(configfile: str) -> dict:
     } # yapf: disable
 
     with open(configfile, "w", encoding="utf-8") as f:
-        yaml.dump(default, f, Dumper=yaml.CDumper, sort_keys=False)
+        yaml.dump(default, f, Dumper=yaml.CSafeDumper, sort_keys=False)
     sys.exit(f"Please edit {configfile} before running me again.")
 
 
