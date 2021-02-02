@@ -6,7 +6,6 @@ import os
 import os.path as op
 import pickle
 import re
-import reprlib
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -260,7 +259,6 @@ class MTeamCollector:
                     yield path
 
     def _login(self):
-
         try:
             r = session.head(self._urls[0], allow_redirects=True)
             r.raise_for_status()
@@ -278,7 +276,6 @@ class MTeamCollector:
 
     def _parse_torrent(self, content: bytes, path: str):
         """Parse a torrent, write file list to `path`."""
-
         try:
             files = Torrent.from_string(content).files
             with open(path, "w", encoding="utf-8") as f:
@@ -480,7 +477,7 @@ class Builder:
 
         return regex
 
-    def _update_file(self, file: str, content: str = None) -> List[str]:
+    def _update_file(self, file: str, content: str = None):
 
         new = () if content is None else [content]
         try:
@@ -589,7 +586,8 @@ class Analyzer:
                 f.write(line)
 
             f.write("\n\nPotential Keywords:\n"
-                    f'{"torrent":>7}  word\n{"-" * 80}\n')
+                    f'{"torrent":>7}  word\n'
+                    f'{"-" * 80}\n')
             f.writelines(f"{i:7d}  {j}\n" for i, j in word_count)
 
         print(f"Result saved to: {report_file}", file=STDERR)
@@ -646,14 +644,24 @@ class Analyzer:
                 m[1] for m in map(self.matcher, filter(self.extfilter, f)) if m)
 
     def _format_report(self, total, count, title, result):
-        r = reprlib.repr
+        f = self._slice_on_len
         yield (
             f"Regex file: {self.regex_file}\n"
             f"Total: {total}, Matched: {count}, Percentage: {count / total:.2%}\n\n"
             f"{title}:\n"
-            f'{"torrent":>7}  {"word":16}strings\n{"-" * 80}\n')
+            f'{"torrent":>7}  {"word":15} strings\n{"-" * 80}\n')
         for i, k, s in result:
-            yield f"{i:7d}  {k:16}{r(s)[1:-1]}\n"
+            yield f'{i:7d}  {k:15} {", ".join(f(s))}\n'
+
+    @staticmethod
+    def _slice_on_len(a: Iterable[str], n: int = 80):
+        i = 0
+        for x in a:
+            i += len(x) + 2
+            if i >= n:
+                yield "..."
+                break
+            yield x
 
 
 def get_freq_words(k: int = 3000):
@@ -689,9 +697,11 @@ def init_session(path: str):
             session.cookies = pickle.load(f)
     except FileNotFoundError:
         session.cookies.set_cookie(
-            requests.cookies.create_cookie(domain="www.javbus.com",
-                                           name="existmag",
-                                           value="all"))
+            requests.cookies.create_cookie(
+                domain="www.javbus.com",
+                name="existmag",
+                value="all",
+            ))
 
 
 def dump_cookies(path: str):
@@ -767,19 +777,19 @@ def parse_arguments():
     )
     group.add_argument(
         "-t",
-        "--test-match",
+        "--test-av",
         dest="mode",
         action="store_const",
-        const="test_match",
-        help="matching test with av torrents",
+        const="test_av",
+        help="test regex with av torrents",
     )
     group.add_argument(
         "-m",
-        "--test-mis",
+        "--test-nonav",
         dest="mode",
         action="store_const",
-        const="test_mis",
-        help="mismatching test with non-av torrents",
+        const="test_nonav",
+        help="test regex with non-av torrents",
     )
     group.set_defaults(mode="build")
 
@@ -817,7 +827,7 @@ def parse_arguments():
         dest="mteam_max",
         action="store",
         type=int,
-        help="maximum mteam pages to scan, override config 'mteam/page_max'",
+        help="maximum mteam pages to scan, override config 'mteam.page_max'",
     )
 
     return parser.parse_args()
@@ -858,7 +868,7 @@ def main():
             config["mteam"]["page_max"] = args.mteam_max
 
         analyzer = Analyzer(config)
-        if args.mode == "test_match":
+        if args.mode == "test_av":
             analyzer.analyze_av(args.local)
         else:
             analyzer.analyze_nonav(args.local)
