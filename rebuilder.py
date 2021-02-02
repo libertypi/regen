@@ -538,7 +538,7 @@ class Analyzer:
         report_file = op.abspath("av_report.txt")
         raw_file = op.abspath("mismatch_raw.txt")
         total = count = 0
-        result = defaultdict(set)
+        strings = defaultdict(set)
         prefix_count = Counter()
         word_count = Counter()
         tmp = set()
@@ -550,8 +550,9 @@ class Analyzer:
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=True)
 
-        with ProcessPoolExecutor() as ex, open(raw_file, "w",
-                                               encoding="utf-8") as f:
+        with ProcessPoolExecutor() as ex, \
+             open(raw_file, "w", encoding="utf-8") as f:
+
             freq_words = ex.submit(get_freq_words)
             for content in ex.map(self._match_av, paths, chunksize=100):
                 total += 1
@@ -560,7 +561,7 @@ class Analyzer:
                     f.write("---\n")
                     f.write(content)
                     for string, prefix in prefix_finder(content):
-                        result[prefix].add(string)
+                        strings[prefix].add(string)
                         tmp.add(prefix)
                     prefix_count.update(tmp)
                     tmp.clear()
@@ -569,26 +570,27 @@ class Analyzer:
                     tmp.clear()
             freq_words = freq_words.result()
 
-        result = [(i, k, v)
-                  for k, v in result.items()
-                  if (i := prefix_count[k]) >= 5 and k not in freq_words]
-        words = [(i, k)
-                 for k, i in word_count.items()
-                 if i >= 5 and k not in freq_words]
+        prefix_count = [(i, k, strings[k])
+                        for k, i in prefix_count.items()
+                        if i >= 5 and k not in freq_words]
+        word_count = [(i, k)
+                      for k, i in word_count.items()
+                      if i >= 5 and k not in freq_words]
 
         f = lambda t: (-t[0], t[1])
-        result.sort(key=f)
-        words.sort(key=f)
+        prefix_count.sort(key=f)
+        word_count.sort(key=f)
+        report = self._format_report(total, total - count,
+                                     "Potential ID Prefixes", prefix_count)
 
         with open(report_file, "w", encoding="utf-8") as f:
-            for line in self._format_report(total, total - count,
-                                            "Potential ID Prefixes", result):
+            for line in report:
                 print(line, end="")
                 f.write(line)
 
             f.write("\n\nPotential Keywords:\n"
                     f'{"torrent":>7}  word\n{"-" * 80}\n')
-            f.writelines(f"{i:7d}  {j}\n" for i, j in words)
+            f.writelines(f"{i:7d}  {j}\n" for i, j in word_count)
 
         print(f"Result saved to: {report_file}", file=STDERR)
 
@@ -598,9 +600,9 @@ class Analyzer:
 
         report_file = op.abspath("nonav_report.txt")
         total = count = 0
-        word_searcher = re.compile(r"[a-z]+").search
+        searcher = re.compile(r"[a-z]+").search
 
-        result = defaultdict(set)
+        strings = defaultdict(set)
         word_count = Counter()
         tmp = set()
         paths = self._mteam.from_cache if local else self._mteam.from_web
@@ -613,20 +615,21 @@ class Analyzer:
                     count += 1
                     for string in video:
                         try:
-                            word = word_searcher(string)[0]
+                            word = searcher(string)[0]
                         except TypeError:
                             word = string
-                        result[word].add(string)
+                        strings[word].add(string)
                         tmp.add(word)
                     word_count.update(tmp)
                     tmp.clear()
 
-        result = [(word_count[k], k, v) for k, v in result.items()]
-        result.sort(key=lambda t: (-t[0], t[1]))
+        word_count = [(i, k, strings[k]) for k, i in word_count.items()]
+        word_count.sort(key=lambda t: (-t[0], t[1]))
+        report = self._format_report(total, count, "Matched Strings",
+                                     word_count)
 
         with open(report_file, "w", encoding="utf-8") as f:
-            for line in self._format_report(total, count, "Matched Strings",
-                                            result):
+            for line in report:
                 print(line, end="")
                 f.write(line)
         print(f"Result saved to: {report_file}", file=STDERR)
