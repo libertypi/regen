@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import os.path as op
+import pickle
 import re
 import reprlib
 import subprocess
@@ -26,6 +27,7 @@ from urllib3 import Retry
 from regen import Regen
 
 STDERR = sys.stderr
+session = None
 
 
 class LastPageReached(Exception):
@@ -173,21 +175,18 @@ class LocalJSONLoader:
 
 class MTeamCollector:
 
-    DOMAIN = "https://pt.m-team.cc"
-
     def __init__(self, *, username: str, password: str, page_max: int,
-                 cache_dir: str, av_page: str, non_av_page: str) -> None:
+                 cache_dir: str, domain: str, av_page: str,
+                 non_av_page: str) -> None:
 
+        self._account = {"username": username, "password": password}
+        self._page_max = page_max
         self._cache_dirs = (
             op.join(cache_dir, "non_av"),
             op.join(cache_dir, "av"),
         )
-        self._urls = (
-            urljoin(self.DOMAIN, non_av_page),
-            urljoin(self.DOMAIN, av_page),
-        )
-        self._page_max = page_max
-        self._account = {"username": username, "password": password}
+        self.domain = domain
+        self._urls = (urljoin(domain, non_av_page), urljoin(domain, av_page))
 
         for cache_dir in self._cache_dirs:
             os.makedirs(cache_dir, exist_ok=True)
@@ -240,7 +239,7 @@ class MTeamCollector:
                     if exists(path):
                         yield path
                     else:
-                        url = urljoin(self.DOMAIN, link)
+                        url = urljoin(self.domain, link)
                         pool[ex.submit(_request, url)] = url, path
             print(total, file=STDERR)
 
@@ -263,18 +262,19 @@ class MTeamCollector:
     def _login(self):
 
         try:
-            r = session.post(
-                url=self.DOMAIN + "/takelogin.php",
-                data=self._account,
-                headers={"referer": self.DOMAIN + "/login.php"},
-            )
-            r.raise_for_status()
             r = session.head(self._urls[0], allow_redirects=True)
+            r.raise_for_status()
             if "/login.php" in r.url:
-                raise requests.RequestException("invalid credentials")
+                r = session.post(
+                    url=urljoin(self.domain, "/takelogin.php"),
+                    data=self._account,
+                    headers={"referer": urljoin(self.domain, "/login.php")},
+                )
+                r.raise_for_status()
+            else:
+                self._login = self._skip
         except requests.RequestException as e:
             sys.exit(f"login failed: {e}")
-        self._login = self._skip
 
     def _parse_torrent(self, content: bytes, path: str):
         """Parse a torrent, write file list to `path`."""
@@ -653,13 +653,23 @@ class Analyzer:
             yield f"{i:7d}  {k:16}{r(s)[1:-1]}\n"
 
 
-def _init_session():
+def get_freq_words(k: int = 3000):
+    """Get wordlist of the top `k` English words which is longer than 3
+    letters."""
+    u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+    m = re.finditer(r"^\s*([A-Za-z]{3,})\s*$", _request(u).text, re.M)
+    return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
 
+
+def _request(url: str, **kwargs):
+    response = session.get(url, timeout=(9.1, 30), **kwargs)
+    response.raise_for_status()
+    return response
+
+
+def init_session(path: str):
+    global session
     session = requests.Session()
-    session.cookies.set_cookie(
-        requests.cookies.create_cookie(domain="www.javbus.com",
-                                       name="existmag",
-                                       value="all"))
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) "
                       "Gecko/20100101 Firefox/80.0"
@@ -670,27 +680,23 @@ def _init_session():
                           backoff_factor=0.3))
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-    return session
+
+    try:
+        with open(path, "rb") as f:
+            session.cookies = pickle.load(f)
+    except FileNotFoundError:
+        session.cookies.set_cookie(
+            requests.cookies.create_cookie(domain="www.javbus.com",
+                                           name="existmag",
+                                           value="all"))
 
 
-def _request(url: str, **kwargs):
-
-    response = session.get(url, timeout=(9.1, 30), **kwargs)
-    response.raise_for_status()
-    return response
-
-
-def get_freq_words(k: int = 3000):
-    """Get wordlist of the top `k` English words which is longer than 3
-    letters."""
-
-    u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    m = re.finditer(r"^\s*([A-Za-z]{3,})\s*$", _request(u).text, re.M)
-    return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
+def dump_cookies(path: str):
+    with open(path, "wb") as f:
+        pickle.dump(session.cookies, f)
 
 
 def parse_config(configfile: str) -> dict:
-
     try:
         with open(configfile, "r", encoding="utf-8") as f:
             config = json.load(f)
@@ -731,6 +737,7 @@ def parse_config(configfile: str) -> dict:
             "password": "",
             "page_max": 500,
             "cache_dir": "cache",
+            "domain": "https://pt.m-team.cc",
             "av_page": "/adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
             "non_av_page": "/torrents.php",
         },
@@ -824,6 +831,7 @@ def main():
         os.mkdir(config)
         os.chdir(config)
     config = parse_config("config.json")
+    init_session("cookies")
 
     if args.file:
         config["regex_file"] = args.file
@@ -852,8 +860,8 @@ def main():
         else:
             analyzer.analyze_nonav(args.local)
 
+    dump_cookies("cookies")
 
-session = _init_session()
 
 if __name__ == "__main__":
     main()
