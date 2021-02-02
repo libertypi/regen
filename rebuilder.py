@@ -555,8 +555,8 @@ class Analyzer:
                 total += 1
                 if content:
                     count += 1
-                    f.write("---\n")
                     f.write(content)
+                    f.write("---\n")
                     for string, prefix in prefix_finder(content):
                         strings[prefix].add(string)
                         tmp.add(prefix)

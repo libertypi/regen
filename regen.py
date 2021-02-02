@@ -401,39 +401,35 @@ def _is_word(token: Token) -> bool:
     return sum(map(len, token)) > 1
 
 
-def _filter_affix(d: Dict[Token, Set[Token]],
-                  intersect: Set[Token] = None) -> Dict[Token, Set[Token]]:
+def _filter_affix(d: dict, s: set = None) -> Dict[Token, Set[Token]]:
     """Keep groups which divide the same words at max common subsequence,
     and remove single member groups.
 
     - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first
         item will be keeped.
     """
-    if intersect is None:
-        stream = d.items()
-    else:
-        stream = _intersect_affix(d, intersect)
-
     tmp = {}
     setdefault = tmp.setdefault
-    for k, v in stream:
-        if len(v) > 1:
-            key = frozenset(v)
-            val = len(k), k
-            if setdefault(key, val) < val:
-                tmp[key] = val
-
+    if s is None:
+        for k, v in d.items():
+            if len(v) > 1:
+                key = frozenset(v)
+                val = len(k), k
+                if setdefault(key, val) < val:
+                    tmp[key] = val
+    else:
+        for k, v in d.items():
+            v.intersection_update(s)
+            if len(v) > 1:
+                key = frozenset(v)
+                val = len(k), k
+                if setdefault(key, val) < val:
+                    tmp[key] = val
     return {k: d[k] for _, k in tmp.values()}
 
 
-def _intersect_affix(d: Dict[Token, Set[Token]], r: Set[Token]):
-    for i in d.items():
-        i[1].intersection_update(r)
-        yield i
-
-
-def _optimize_group(unvisited: Set[FrozenSet[Token]],
-                    candidate: Dict[FrozenSet[Token], Tuple[int, str]]):
+def _optimize_group(unvisited: set,
+                    candidate: dict) -> Iterator[FrozenSet[Token]]:
     """Divide candidates into groups that each group is internally connected
     with common members. Then for each group, find the best non-overlapping
     members to reach the maximum length reduction.
@@ -575,25 +571,17 @@ def parse_arguments():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description=
-        """Generate regular expressions from a set of words and regexes.
-Author: David Pi <libertypi@gmail.com>""",
-        epilog="""examples:
-  %(prog)s cat bat at "fat|boat"
-  %(prog)s -e "[AB]C[DE]"
-  %(prog)s -f words.txt""",
+        description=(
+            "Generate regular expressions from a set of words and regexes.\n"
+            "Author: David Pi <libertypi@gmail.com>"),
+        epilog=("examples:\n"
+                '  %(prog)s cat bat at "fat|boat"\n'
+                '  %(prog)s -e "[AB]C[DE]"\n'
+                '  %(prog)s -f words.txt'),
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
     mode_group = parser.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "-e",
-        "--extract",
-        dest="mode",
-        action="store_const",
-        const="extract",
-        help="extract Regex to a list of corresponding words",
-    )
     mode_group.add_argument(
         "-c",
         "--compute",
@@ -602,6 +590,14 @@ Author: David Pi <libertypi@gmail.com>""",
         const="compute",
         help="compute an optimized regex matching the words (default)",
     )
+    mode_group.add_argument(
+        "-e",
+        "--extract",
+        dest="mode",
+        action="store_const",
+        const="extract",
+        help="extract Regex to a list of corresponding words",
+    )
     parser.set_defaults(mode="compute")
 
     parser.add_argument(
@@ -609,7 +605,7 @@ Author: David Pi <libertypi@gmail.com>""",
         "--verify",
         dest="verify",
         action="store_true",
-        help="verify the generated regex by rematching it against input",
+        help="verify the resulted regex by matching it against input",
     )
     parser.add_argument(
         "-o",
