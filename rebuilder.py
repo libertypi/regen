@@ -161,13 +161,13 @@ class LocalJSONLoader:
     def get_id(self) -> Iterable[str]:
         print("Reading local json...", file=STDERR)
         if len(self.config) == 1:
-            with open(self.config[0], "rb") as f:
+            with open(self.config[0], "r", encoding="utf-8") as f:
                 return json.load(f)
         return self._get_id_multifiles()
 
     def _get_id_multifiles(self) -> Iterable[str]:
         for path in self.config:
-            with open(path, "rb") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             yield from data
 
@@ -355,7 +355,7 @@ class Builder:
     def from_cache(self) -> Optional[str]:
 
         try:
-            with open(self._datafile, "rb") as f:
+            with open(self._datafile, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError) as e:
             sys.exit(e)
@@ -711,7 +711,7 @@ def dump_cookies(path: str):
 
 def parse_config(configfile: str) -> dict:
     try:
-        with open(configfile, "rb") as f:
+        with open(configfile, "r", encoding="utf-8") as f:
             config = json.load(f)
         a = op.normpath
         b = op.expanduser
