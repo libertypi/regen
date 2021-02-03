@@ -727,8 +727,8 @@ def parse_config(configfile: str) -> dict:
 
     default = {
         "regex_file": "regex.txt",
-        "keyword_max": 200,
-        "prefix_max": 3000,
+        "keyword_max": 150,
+        "prefix_max": 3500,
         "local_json": [],
         "online_json": ["https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"],
         "javbus": {
