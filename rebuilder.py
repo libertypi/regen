@@ -325,12 +325,13 @@ class MTeamCollector:
 
 class Builder:
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, *, regex_file: str, keyword_max: int, prefix_max: int,
+                 **kwargs) -> None:
 
-        self._config = config
-        self._regex_file = config["regex_file"]
-        self._keyword_max = config["keyword_max"]
-        self._prefix_max = config["prefix_max"]
+        self._regex_file = regex_file
+        self._keyword_max = keyword_max
+        self._prefix_max = prefix_max
+        self._config = kwargs
         self._datafile = "data.json"
         self._customfile = "custom.yaml"
 
@@ -504,11 +505,10 @@ class Builder:
 
 class Analyzer:
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, *, regex_file: str, mteam: dict, **kwargs) -> None:
 
-        self.regex_file = config["regex_file"]
         try:
-            with open(self.regex_file, "r", encoding="utf-8") as f:
+            with open(regex_file, "r", encoding="utf-8") as f:
                 regex = f.readline().strip()
                 if f.read():
                     raise ValueError("regex file should contain only one line")
@@ -526,7 +526,8 @@ class Analyzer:
         self.extfilter = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
-        self._mteam = MTeamCollector(**config["mteam"])
+        self.regex_file = regex_file
+        self._mteam = MTeamCollector(**mteam)
 
     def analyze_av(self, local: bool = False):
 
@@ -856,7 +857,7 @@ def main():
         if args.prefix_max is not None:
             config["prefix_max"] = args.prefix_max
 
-        builder = Builder(config)
+        builder = Builder(**config)
         if args.local:
             builder.from_cache()
         else:
@@ -867,7 +868,7 @@ def main():
         if args.mteam_max is not None:
             config["mteam"]["page_max"] = args.mteam_max
 
-        analyzer = Analyzer(config)
+        analyzer = Analyzer(**config)
         if args.mode == "test_av":
             analyzer.analyze_av(args.local)
         else:
