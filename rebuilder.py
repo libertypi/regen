@@ -541,7 +541,7 @@ class Analyzer:
         word_count = Counter()
         tmp = set()
         prefix_finder = re.compile(
-            r"\b([0-9]{,3}([a-z]{2,8})-?[0-9]{2,8}(?:[hm]hb[0-9]{,2})?)\b.*$",
+            r"\b([0-9]{,3}([a-z]{2,10})-?[0-9]{2,8}(?:[hm]hb[0-9]{,2})?)\b.*$",
             flags=re.M).findall
         word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
 
