@@ -527,7 +527,8 @@ class Analyzer:
             sys.exit(e)
 
         self.extfilter = re.compile(
-            r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
+            r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|"
+            r"avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
         self.regex_file = regex_file
         self._mteam = MTeamCollector(**mteam)
@@ -543,10 +544,12 @@ class Analyzer:
         prefix_count = Counter()
         word_count = Counter()
         tmp = set()
+        tmp_add = tmp.add
         prefix_finder = re.compile(
-            r"\b([0-9]{,3}([a-z]{2,10})-?[0-9]{2,8}(?:[hm]hb[0-9]{,2})?)\b.*$",
+            r"(?:^|/)([0-9]{,3}([a-z]{2,8})"
+            r"(?:-[0-9]{2,8}|[0-9]{2,8}[hm]hb[0-9]{,2}))\b.*$",
             flags=re.M).findall
-        word_finder = re.compile(r"(?![\d_]+\b)\w{3,}").findall
+        word_finder = re.compile(r"\b([a-z]{2,})(?:[ ._-]|\b)", re.M).finditer
 
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=True)
@@ -554,7 +557,7 @@ class Analyzer:
         with ProcessPoolExecutor() as ex, \
              open(raw_file, "w", encoding="utf-8") as f:
 
-            freq_words = ex.submit(get_freq_words)
+            freq_words = ex.submit(get_freq_words, 2)
             for content in ex.map(self._match_av, paths, chunksize=100):
                 total += 1
                 if content:
@@ -563,17 +566,26 @@ class Analyzer:
                     f.write("---\n")
                     for string, prefix in prefix_finder(content):
                         strings[prefix].add(string)
-                        tmp.add(prefix)
+                        tmp_add(prefix)
                     prefix_count.update(tmp)
                     tmp.clear()
-                    tmp.update(word_finder(content))
+
+                    lastend = lastword = None
+                    for m in word_finder(content):
+                        word = m[1]
+                        tmp_add(word)
+                        start, end = m.span()
+                        if start == lastend:
+                            tmp_add(f"{lastword} {word}")
+                        lastend = end
+                        lastword = word
                     word_count.update(tmp)
                     tmp.clear()
             freq_words = freq_words.result()
 
-        prefix_count = [(i, k, strings[k])
-                        for k, i in prefix_count.items()
-                        if i >= 5 and k not in freq_words]
+        prefix_count = [
+            (i, k, strings[k]) for k, i in prefix_count.items() if i >= 5
+        ]
         word_count = [(i, k)
                       for k, i in word_count.items()
                       if i >= 5 and k not in freq_words]
@@ -668,11 +680,10 @@ class Analyzer:
             yield x
 
 
-def get_freq_words(k: int = 3000):
-    """Get wordlist of the top `k` English words which is longer than 3
-    letters."""
+def get_freq_words(lo=3, k: int = 3000):
+    """Get wordlist of the top `k` English words longer than `lo` letters."""
     u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    m = re.finditer(r"^\s*([A-Za-z]{3,})\s*$", _request(u).text, re.M)
+    m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$", _request(u).text, re.M)
     return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
 
 
