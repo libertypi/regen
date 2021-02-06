@@ -263,14 +263,17 @@ class MTeamCollector:
             r = session.head(self._urls[0], allow_redirects=True)
             r.raise_for_status()
             if "/login.php" in r.url:
-                r = session.post(
+                print("login...", end="", flush=True)
+                session.post(
                     url=urljoin(self.domain, "/takelogin.php"),
                     data=self._account,
                     headers={"referer": urljoin(self.domain, "/login.php")},
                 )
+                r = session.head(self._urls[0], allow_redirects=True)
                 r.raise_for_status()
-            else:
-                self._login = self._skip
+                if "/login.php" in r.url:
+                    raise requests.RequestException("invalid credentials")
+            self._login = self._skip
         except requests.RequestException as e:
             sys.exit(f"login failed: {e}")
 
