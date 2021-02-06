@@ -35,16 +35,94 @@ class LastPageReached(Exception):
 
 class Scraper:
 
-    __slots__ = ("ex", "western", "jav")
-    ex: ThreadPoolExecutor
-    STEP: int = 500
+    ID_RE = r"\s*([a-z]{3,8})[_-]?(\d{2,8})\s*"
+    NAME: str
+
+    def __init__(self, ex: ThreadPoolExecutor) -> None:
+        self.ex = ex
+        self.m = re.compile(self.ID_RE).fullmatch
 
     def get_tree(self, url: str, i: int) -> HtmlElement:
         raise NotImplementedError
 
+    def get_id(self) -> Iterator[re.Match]:
+        print(f"{self.NAME}: Scanning product ids...", file=STDERR)
+        return filter(None, map(self.m, map(str.lower, self._scrape_id())))
+
+    def _scrape_id(self) -> Iterator[str]:
+        raise NotImplementedError
+
+
+class DMMScraper(Scraper):
+
+    ID_RE = r"/cid=(?:[a-z]+_)?\d*([a-z]{3,8})(\d{2,8})/"
+    NAME = "DMM"
+
+    def __init__(self, ex: ThreadPoolExecutor) -> None:
+        self.ex = ex
+        self.m = re.compile(self.ID_RE).search
+
+    @staticmethod
+    def get_tree(url: str) -> HtmlElement:
+        return html_fromstring(_request(url).content, base_url=url)
+
+    def _scrape_id(self):
+
+        url = "https://www.dmm.co.jp/digital/{}/-/list/=/sort=release_date/view=text/"
+        paths = ("videoa", "videoc")
+        get_tree = self.get_tree
+        submit = self.ex.submit
+        xpath = XPath(
+            './/div[@class="d-area"]//div[@class="d-item"]'
+            '//tr/td[1]/p[@class="ttl"]/a/@href',
+            smart_strings=False)
+
+        pool = [submit(get_tree, url.format(k)) for k in paths]
+        for ft in as_completed(pool):
+            tree = ft.result()
+            url = tree.base_url
+            i = tree.xpath(
+                'string(.//div[@class="list-capt"]//li[@class="terminal"]'
+                '/a/@href[contains(., "/page=")])',
+                smart_strings=False)
+            i = int(re.search(r"/page=(\d+)/", i)[1])
+            pool.extend(
+                submit(get_tree, f"{url}page={j}/") for j in range(2, i + 1))
+
+        print("  /page: ", end="", file=STDERR)
+        total = len(pool)
+        step = frozenset(range(1, total, (total // 10) or 1))
+        pool = as_completed(pool)
+        for i, ft in enumerate(pool, 1):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            yield from xpath(ft.result())
+        print(total, file=STDERR)
+
+
+class JavBusScraper(Scraper):
+
+    NAME = "JavBus"
+    STEP: int = 500
+    XP = './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()'
+
+    def __init__(self, ex, western, jav):
+        super().__init__(ex)
+        self.western = western
+        self.jav = jav
+        self.xpath = XPath(self.XP, smart_strings=False)
+
+    @staticmethod
+    def get_tree(url: str, i: int):
+        try:
+            return html_fromstring(_request(f"{url}/{i}").content)
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                raise LastPageReached(i)
+            raise
+
     def _scrape(self, xpath: Union[XPath, str], domain: str, pages: Tuple[str]):
 
-        print(f"Scanning {urlsplit(domain).netloc}", file=STDERR)
         if isinstance(xpath, str):
             xpath = XPath(xpath, smart_strings=False)
 
@@ -62,58 +140,31 @@ class Scraper:
             except LastPageReached as e:
                 print(e, file=STDERR)
 
-
-class JavBusScraper(Scraper):
-
-    __slots__ = "xpath"
-
-    def __init__(self, ex, western, jav):
-        self.ex = ex
-        self.western = western
-        self.jav = jav
-        self.xpath = XPath(
-            './/div[@id="waterfall"]//a[@class="movie-box"]'
-            '//span/date[1]/text()',
-            smart_strings=False)
-
-    @staticmethod
-    def get_tree(url: str, i: int):
-        try:
-            return html_fromstring(_request(f"{url}/{i}").content)
-        except requests.HTTPError as e:
-            if e.response.status_code == 404:
-                raise LastPageReached(i)
-            raise
-
     def get_keyword(self):
+        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
         f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         r = self._scrape(self.xpath, **self.western)
         return Counter(m[1].lower() for m in map(f, r) if m).items()
 
-    def get_id(self):
+    def _scrape_id(self):
         return self._scrape(self.xpath, **self.jav)
 
 
-class JavDBScraper(Scraper):
+class JavDBScraper(JavBusScraper):
 
-    __slots__ = "nav_xp"
+    NAME = "JavDB"
     STEP = 100
-
-    def __init__(self, ex, western, jav):
-        self.ex = ex
-        self.western = western
-        self.jav = jav
-        self.nav_xp = XPath(
-            '//section/div[@class="container"]//ul[@class="pagination-list"]/li'
-            '/a[contains(@class, "is-current") and normalize-space()=$page]')
+    XP = ('//section/div[@class="container"]//ul[@class="pagination-list"]/li'
+          '/a[contains(@class, "is-current") and normalize-space()=$page]')
 
     def get_tree(self, url: str, i: int):
         tree = html_fromstring(_request(url, params={"page": i}).content)
-        if self.nav_xp(tree, page=i):
+        if self.xpath(tree, page=i):
             return tree
         raise LastPageReached(i)
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
+        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
         matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
         searcher = re.compile(r"\d+").search
         xpath = '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]'
@@ -126,21 +177,20 @@ class JavDBScraper(Scraper):
                 except TypeError:
                     pass
 
-    def get_id(self) -> Iterator[str]:
+    def _scrape_id(self) -> Iterator[str]:
         xpath = './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()'
         return self._scrape(xpath, **self.jav)
 
 
-class OnlineJsonScraper:
+class OnlineJsonScraper(Scraper):
 
-    __slots__ = ("ex", "config")
+    NAME = "Online JSON"
 
     def __init__(self, ex, config: List[str]) -> None:
-        self.ex = ex
+        super().__init__(ex)
         self.config = config
 
-    def get_id(self) -> Iterable[str]:
-        print("Downloading online json...", file=STDERR)
+    def _scrape_id(self) -> Iterable[str]:
         if len(self.config) == 1:
             return _request(self.config[0]).json()
         return self._get_id_multifiles()
@@ -151,15 +201,12 @@ class OnlineJsonScraper:
             yield from ft.result().json()
 
 
-class LocalJSONLoader:
+class LocalJSONLoader(OnlineJsonScraper):
 
-    __slots__ = "config"
+    ID_RE = r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*"
+    NAME = "Local JSON"
 
-    def __init__(self, config: List[str]) -> None:
-        self.config = config
-
-    def get_id(self) -> Iterable[str]:
-        print("Reading local json...", file=STDERR)
+    def _scrape_id(self) -> Iterable[str]:
         if len(self.config) == 1:
             with open(self.config[0], "r", encoding="utf-8") as f:
                 return json.load(f)
@@ -345,8 +392,9 @@ class Builder:
             scrapers = (
                 JavBusScraper(ex, **config["javbus"]),
                 JavDBScraper(ex, **config["javdb"]),
+                DMMScraper(ex),
                 OnlineJsonScraper(ex, config["online_json"]),
-                LocalJSONLoader(config["local_json"]),
+                LocalJSONLoader(ex, config["local_json"]),
             )
             data = {
                 "keyword": self._scrape_keyword(scrapers),
@@ -365,7 +413,7 @@ class Builder:
             sys.exit(e)
         return self._build(data)
 
-    def _scrape_keyword(self, scrapers) -> Dict[str, int]:
+    def _scrape_keyword(self, scrapers: Tuple[Scraper]) -> Dict[str, int]:
 
         d = {}
         setdefault = d.setdefault
@@ -379,13 +427,11 @@ class Builder:
                     d[k] = v
         return self._sort_scrape(d.items())
 
-    def _scrape_prefix(self, scrapers) -> Dict[str, int]:
+    def _scrape_prefix(self, scrapers: Tuple[Scraper]) -> Dict[str, int]:
 
         d = defaultdict(set)
-        r = re.compile(r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*").fullmatch
-
         for s in scrapers:
-            for m in filter(None, map(r, map(str.lower, s.get_id()))):
+            for m in s.get_id():
                 d[m[1]].add(int(m[2]))
         return self._sort_scrape(zip(d, map(len, d.values())))
 
@@ -716,6 +762,12 @@ def init_session(path: str):
                 domain="www.javbus.com",
                 name="existmag",
                 value="all",
+            ))
+        session.cookies.set_cookie(
+            requests.cookies.create_cookie(
+                domain="dmm.co.jp",
+                name="age_check_done",
+                value="1",
             ))
 
 
