@@ -182,7 +182,7 @@ class DMMScraper(Scraper):
             i = range(2, int(i[2]) + 1)
             pool.extend(submit(get_tree, url(j)) for j in i)
 
-        print("  /page: ", end="", flush=True, file=STDERR)
+        print("  /page: ", end="", file=STDERR)
         total = len(pool)
         step = frozenset(range(1, total, (total // 10) or 1))
         pool = as_completed(pool)
