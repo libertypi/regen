@@ -304,6 +304,8 @@ class MTeamCollector:
                 except requests.RequestException as e:
                     print(e, file=STDERR)
                 except Exception as e:
+                    if hasattr(e, "stderr") and e.stderr:
+                        e = e.stderr
                     print(f"Error: {e}", file=STDERR)
                     try:
                         os.unlink(path)
