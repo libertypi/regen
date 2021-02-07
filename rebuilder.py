@@ -14,7 +14,7 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
 from itertools import chain, filterfalse, islice, repeat, tee
 from operator import itemgetter
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 import requests
 from lxml.etree import XPath
@@ -27,6 +27,8 @@ from regen import Regen
 
 STDERR = sys.stderr
 session = None
+RE_G1 = r"[a-z]{3,10}"
+RE_G2 = r"[0-9]{2,8}"
 
 
 class LastPageReached(Exception):
@@ -35,19 +37,15 @@ class LastPageReached(Exception):
 
 class Scraper:
 
-    ID_RE = r"\s*([a-z]{3,8})[_-]?(\d{2,8})\s*"
-    NAME: str
-
-    def __init__(self, ex: ThreadPoolExecutor = None) -> None:
-        self.ex = ex
-        self.m = re.compile(self.ID_RE).fullmatch
+    ID_RE = rf"^\s*({RE_G1})[_-]?({RE_G2})\s*$"
+    ex: ThreadPoolExecutor
 
     def get_tree(self, url: str, i: int) -> HtmlElement:
         raise NotImplementedError
 
     def get_id(self) -> Iterator[re.Match]:
-        print(f"{self.NAME}: Scanning product ids...", file=STDERR)
-        return filter(None, map(self.m, map(str.lower, self._scrape_id())))
+        r = re.compile(self.ID_RE).search
+        return filter(None, map(r, map(str.lower, self._scrape_id())))
 
     def _scrape_id(self) -> Iterator[str]:
         raise NotImplementedError
@@ -55,18 +53,17 @@ class Scraper:
 
 class JavBusScraper(Scraper):
 
-    NAME = "JavBus"
-    STEP: int = 500
+    STEP = 500
     XP = './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()'
 
     def __init__(self, ex):
-        super().__init__(ex)
+        self.ex = ex
         self.xpath = xp_compile(self.XP)
 
     @staticmethod
     def get_tree(url: str, i: int):
         try:
-            return html_fromstring(_request(f"{url}/{i}").content)
+            return html_fromstring(_request(f"{url}{i}").content)
         except requests.HTTPError as e:
             if e.response.status_code == 404:
                 raise LastPageReached(i)
@@ -74,13 +71,14 @@ class JavBusScraper(Scraper):
 
     def _scrape(self, xpath: Union[XPath, str], domain: str, pages: Tuple[str]):
 
+        print(f"Scanning {urlsplit(domain).netloc} ...", file=STDERR)
         if isinstance(xpath, str):
             xpath = xp_compile(xpath)
 
         for page in pages:
             lo = 1
             print(f"  {page}: ", end="", flush=True, file=STDERR)
-            url = repeat(urljoin(domain, page))
+            url = repeat(domain + page)
             try:
                 while True:
                     hi = lo + self.STEP
@@ -92,11 +90,12 @@ class JavBusScraper(Scraper):
                 print(e, file=STDERR)
 
     def get_keyword(self):
-        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
+
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
-            pages=("/page", "/studio/1", "/studio/2", "/studio/3", "/studio/4"),
+            pages=("/page/", "/studio/1/", "/studio/2/", "/studio/3/",
+                   "/studio/4/"),
         )
         f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         return Counter(m[1].lower() for m in map(f, r) if m).items()
@@ -105,39 +104,38 @@ class JavBusScraper(Scraper):
         return self._scrape(
             self.xpath,
             domain="https://www.javbus.com",
-            pages=("/page", "/uncensored/page", "/genre/hd",
-                   "/uncensored/genre/hd"),
+            pages=("/page/", "/uncensored/page/", "/genre/hd/",
+                   "/uncensored/genre/hd/"),
         )
 
 
 class JavDBScraper(JavBusScraper):
 
-    NAME = "JavDB"
     STEP = 100
     XP = ('//section/div[@class="container"]//ul[@class="pagination-list"]/li'
           '/a[contains(@class, "is-current") and normalize-space()=$page]')
 
     def get_tree(self, url: str, i: int):
-        tree = html_fromstring(_request(url, params={"page": i}).content)
+        tree = html_fromstring(_request(f"{url}?page={i}").content)
         if self.xpath(tree, page=i):
             return tree
         raise LastPageReached(i)
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
-        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
+
         result = self._scrape(
             '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
             domain="https://javdb.com",
             pages=("/series/western",),
         )
-        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
-        searcher = re.compile(r"\d+").search
+        re_title = re.compile(r"[a-z0-9]{3,}").fullmatch
+        re_digit = re.compile(r"\d+").search
 
         for a in result:
             title = a.findtext("strong").replace(" ", "").lower()
-            if matcher(title):
+            if re_title(title):
                 try:
-                    yield title, int(searcher(a.findtext("span"))[0])
+                    yield title, int(re_digit(a.findtext("span"))[0])
                 except TypeError:
                     pass
 
@@ -151,42 +149,46 @@ class JavDBScraper(JavBusScraper):
 
 class DMMScraper(Scraper):
 
-    ID_RE = r"/cid=(?:[a-z]+_)?\d*([a-z]{3,8})(\d{2,8})/"
-    NAME = "DMM"
+    ID_RE = rf"/cid=(?:[a-z]+_)?\d*({RE_G1})({RE_G2})[a-z]?/"
 
-    def __init__(self, ex: ThreadPoolExecutor) -> None:
+    def __init__(self, ex) -> None:
         self.ex = ex
-        self.m = re.compile(self.ID_RE).search
 
     @staticmethod
     def get_tree(url: str) -> HtmlElement:
-        return html_fromstring(_request(url).content, base_url=url)
+        r = _request(url)
+        return html_fromstring(r.content, base_url=r.url)
 
     def _scrape_id(self):
 
-        url = "https://www.dmm.co.jp/digital/{}/-/list/=/sort=release_date/view=text/"
-        paths = ("videoa", "videoc")
+        url = (
+            "https://www.dmm.co.jp/digital/videoa/-/list/=/sort=release_date/view=text/",
+            "https://www.dmm.co.jp/digital/videoc/-/list/=/sort=release_date/view=text/",
+        )
+        print(f"Scanning {urlsplit(url[0]).netloc} ...", file=STDERR)
+
+        xpath = xp_compile(
+            'string(.//div[@class="list-capt"]//li[@class="terminal"]'
+            '/a/@href[contains(., "/page=")])')
         get_tree = self.get_tree
         submit = self.ex.submit
-        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
-                           '//tr/td[1]/p[@class="ttl"]/a/@href')
 
-        pool = [submit(get_tree, url.format(k)) for k in paths]
+        pool = [submit(get_tree, u) for u in url]
         for ft in as_completed(pool):
             tree = ft.result()
-            url = tree.base_url
-            i = tree.xpath(
-                'string(.//div[@class="list-capt"]//li[@class="terminal"]'
-                '/a/@href[contains(., "/page=")])',
-                smart_strings=False)
-            i = int(re.search(r"/page=(\d+)/", i)[1])
-            pool.extend(
-                submit(get_tree, f"{url}page={j}/") for j in range(2, i + 1))
+            i = re.fullmatch(r"(.*/page=)(\d+)(/.*)",
+                             urljoin(tree.base_url, xpath(tree)))
+            url = f"{i[1]}{{}}{i[3]}".format
+            i = range(2, int(i[2]) + 1)
+            pool.extend(submit(get_tree, url(j)) for j in i)
 
-        print("  /page: ", end="", file=STDERR)
+        print("  /page: ", end="", flush=True, file=STDERR)
         total = len(pool)
         step = frozenset(range(1, total, (total // 10) or 1))
         pool = as_completed(pool)
+        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
+                           '//tr/td[1]/p[@class="ttl"]/a/@href')
+
         for i, ft in enumerate(pool, 1):
             if i in step:
                 print(f"{i}..", end="", flush=True, file=STDERR)
@@ -196,27 +198,26 @@ class DMMScraper(Scraper):
 
 class OnlineJsonScraper(Scraper):
 
-    ID_RE = r"\s*([a-z]{3,8})[_-]?(\d{2,8})[a-z]?\s*"
-    NAME = "Online JSON"
-    URL = "https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"
-
-    def _scrape_id(self) -> Iterable[str]:
-        return _request(self.URL).json()
+    @staticmethod
+    def _scrape_id() -> Iterable[str]:
+        url = "https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"
+        print(f"Scanning {urlsplit(url).netloc} ...", file=STDERR)
+        return _request(url).json()
 
 
 class MGSJsonLoader(Scraper):
 
-    ID_RE = r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*"
-    NAME = "Local JSON"
+    ID_RE = rf"^\s*\d*({RE_G1})-({RE_G2})\s*$"
 
     def __init__(self, path) -> None:
-        super().__init__()
         self.path = path
 
     def _scrape_id(self) -> Iterable[str]:
-        if not self.path:
+        path = self.path
+        if not path:
             return ()
-        with open(self.path, "r", encoding="utf-8") as f:
+        print(f"Loading {op.basename(path)} ...", file=STDERR)
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
 
 
@@ -593,7 +594,7 @@ class Analyzer:
         tmp = set()
         tmp_add = tmp.add
         prefix_finder = re.compile(
-            r"(?:^|/)([0-9]{,3}([a-z]{2,8})"
+            r"(?:^|/)([0-9]{,3}([a-z]{2,10})"
             r"(?:-[0-9]{2,8}|[0-9]{2,8}[hm]hb[0-9]{,2}))\b.*$",
             flags=re.M).findall
         word_finder = re.compile(r"\b([a-z]{2,})(?:[ ._-]|\b)", re.M).finditer
@@ -739,7 +740,7 @@ def get_freq_words(lo=3, k: int = 3000):
 
 
 def _request(url: str, **kwargs):
-    response = session.get(url, timeout=(9.1, 30), **kwargs)
+    response = session.get(url, timeout=(9.1, 60), **kwargs)
     response.raise_for_status()
     return response
 
@@ -752,7 +753,7 @@ def init_session(path: str):
                       "Gecko/20100101 Firefox/80.0"
     })
     adapter = requests.adapters.HTTPAdapter(
-        max_retries=Retry(total=5,
+        max_retries=Retry(total=7,
                           status_forcelist=frozenset((500, 502, 503, 504)),
                           backoff_factor=0.3))
     session.mount("http://", adapter)
