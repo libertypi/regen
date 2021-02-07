@@ -21,7 +21,6 @@ from lxml.etree import XPath
 from lxml.html import HtmlElement
 from lxml.html import fromstring as html_fromstring
 from torrentool.api import Torrent
-from urllib3 import Retry
 
 from regen import Regen
 
@@ -743,6 +742,9 @@ def _request(url: str, **kwargs):
 
 
 def init_session(path: str):
+
+    from urllib3 import Retry
+
     global session
     session = requests.Session()
     session.headers.update({
@@ -818,7 +820,7 @@ def parse_config(configfile: str) -> dict:
 def parse_arguments():
 
     parser = argparse.ArgumentParser(
-        description="The ultimate Regex builder, by David Pi.")
+        description="The Ultimate Regex Builder, by David Pi.")
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -827,7 +829,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="build",
-        help="build regex and save to file (default)",
+        help="generate regex and save to file (default)",
     )
     group.add_argument(
         "-t",
@@ -846,44 +848,42 @@ def parse_arguments():
         help="test regex with non-av torrents",
     )
     group.set_defaults(mode="build")
-
     parser.add_argument(
         "-l",
         "--local",
         dest="local",
         action="store_true",
-        help="use cached data instead of web scraping "
-        "(default %(default)s)",
+        help="use cached data instead of web scraping (default %(default)s)",
     )
-    parser.add_argument(
-        "-f",
+
+    group = parser.add_argument_group(title="configfile override")
+    group.add_argument(
         "--file",
         dest="file",
         action="store",
-        help="the target file, override config 'regex_file'",
+        help="the target file, override 'regex_file'",
     )
-    parser.add_argument(
+    group.add_argument(
         "--kmax",
         dest="keyword_max",
         action="store",
         type=int,
-        help="maximum keywords, override config 'keyword_max' (0 for unlimited)",
+        help="maximum keywords, override 'keyword_max' (0 for unlimited)",
     )
-    parser.add_argument(
+    group.add_argument(
         "--pmax",
         dest="prefix_max",
         action="store",
         type=int,
-        help="maximum prefixes, override config 'prefix_max' (0 for unlimited)",
+        help="maximum prefixes, override 'prefix_max' (0 for unlimited)",
     )
-    parser.add_argument(
+    group.add_argument(
         "--mtmax",
         dest="mteam_max",
         action="store",
         type=int,
-        help="maximum mteam pages to scan, override config 'mteam.page_max'",
+        help="maximum mteam pages to scan, override 'mteam.page_max'",
     )
-
     return parser.parse_args()
 
 
