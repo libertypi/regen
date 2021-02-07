@@ -14,7 +14,7 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
 from itertools import chain, filterfalse, islice, repeat, tee
 from operator import itemgetter
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 import requests
 from lxml.etree import XPath
@@ -38,7 +38,7 @@ class Scraper:
     ID_RE = r"\s*([a-z]{3,8})[_-]?(\d{2,8})\s*"
     NAME: str
 
-    def __init__(self, ex: ThreadPoolExecutor) -> None:
+    def __init__(self, ex: ThreadPoolExecutor = None) -> None:
         self.ex = ex
         self.m = re.compile(self.ID_RE).fullmatch
 
@@ -51,6 +51,102 @@ class Scraper:
 
     def _scrape_id(self) -> Iterator[str]:
         raise NotImplementedError
+
+
+class JavBusScraper(Scraper):
+
+    NAME = "JavBus"
+    STEP: int = 500
+    XP = './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()'
+
+    def __init__(self, ex):
+        super().__init__(ex)
+        self.xpath = xp_compile(self.XP)
+
+    @staticmethod
+    def get_tree(url: str, i: int):
+        try:
+            return html_fromstring(_request(f"{url}/{i}").content)
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                raise LastPageReached(i)
+            raise
+
+    def _scrape(self, xpath: Union[XPath, str], domain: str, pages: Tuple[str]):
+
+        if isinstance(xpath, str):
+            xpath = xp_compile(xpath)
+
+        for page in pages:
+            lo = 1
+            print(f"  {page}: ", end="", flush=True, file=STDERR)
+            url = repeat(urljoin(domain, page))
+            try:
+                while True:
+                    hi = lo + self.STEP
+                    print(f"{lo}..", end="", flush=True, file=STDERR)
+                    trees = self.ex.map(self.get_tree, url, range(lo, hi))
+                    yield from chain.from_iterable(map(xpath, trees))
+                    lo = hi
+            except LastPageReached as e:
+                print(e, file=STDERR)
+
+    def get_keyword(self):
+        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
+        r = self._scrape(
+            self.xpath,
+            domain="https://www.javbus.org",
+            pages=("/page", "/studio/1", "/studio/2", "/studio/3", "/studio/4"),
+        )
+        f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
+        return Counter(m[1].lower() for m in map(f, r) if m).items()
+
+    def _scrape_id(self):
+        return self._scrape(
+            self.xpath,
+            domain="https://www.javbus.com",
+            pages=("/page", "/uncensored/page", "/genre/hd",
+                   "/uncensored/genre/hd"),
+        )
+
+
+class JavDBScraper(JavBusScraper):
+
+    NAME = "JavDB"
+    STEP = 100
+    XP = ('//section/div[@class="container"]//ul[@class="pagination-list"]/li'
+          '/a[contains(@class, "is-current") and normalize-space()=$page]')
+
+    def get_tree(self, url: str, i: int):
+        tree = html_fromstring(_request(url, params={"page": i}).content)
+        if self.xpath(tree, page=i):
+            return tree
+        raise LastPageReached(i)
+
+    def get_keyword(self) -> Iterable[Tuple[str, int]]:
+        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
+        result = self._scrape(
+            '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
+            domain="https://javdb.com",
+            pages=("/series/western",),
+        )
+        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
+        searcher = re.compile(r"\d+").search
+
+        for a in result:
+            title = a.findtext("strong").replace(" ", "").lower()
+            if matcher(title):
+                try:
+                    yield title, int(searcher(a.findtext("span"))[0])
+                except TypeError:
+                    pass
+
+    def _scrape_id(self) -> Iterator[str]:
+        return self._scrape(
+            './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
+            domain="https://javdb.com",
+            pages=("/uncensored", "/"),
+        )
 
 
 class DMMScraper(Scraper):
@@ -72,10 +168,8 @@ class DMMScraper(Scraper):
         paths = ("videoa", "videoc")
         get_tree = self.get_tree
         submit = self.ex.submit
-        xpath = XPath(
-            './/div[@class="d-area"]//div[@class="d-item"]'
-            '//tr/td[1]/p[@class="ttl"]/a/@href',
-            smart_strings=False)
+        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
+                           '//tr/td[1]/p[@class="ttl"]/a/@href')
 
         pool = [submit(get_tree, url.format(k)) for k in paths]
         for ft in as_completed(pool):
@@ -100,130 +194,38 @@ class DMMScraper(Scraper):
         print(total, file=STDERR)
 
 
-class JavBusScraper(Scraper):
-
-    NAME = "JavBus"
-    STEP: int = 500
-    XP = './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()'
-
-    def __init__(self, ex, western, jav):
-        super().__init__(ex)
-        self.western = western
-        self.jav = jav
-        self.xpath = XPath(self.XP, smart_strings=False)
-
-    @staticmethod
-    def get_tree(url: str, i: int):
-        try:
-            return html_fromstring(_request(f"{url}/{i}").content)
-        except requests.HTTPError as e:
-            if e.response.status_code == 404:
-                raise LastPageReached(i)
-            raise
-
-    def _scrape(self, xpath: Union[XPath, str], domain: str, pages: Tuple[str]):
-
-        if isinstance(xpath, str):
-            xpath = XPath(xpath, smart_strings=False)
-
-        for page in pages:
-            lo = 1
-            print(f"  {page}: ", end="", flush=True, file=STDERR)
-            url = repeat(urljoin(domain, page))
-            try:
-                while True:
-                    hi = lo + self.STEP
-                    print(f"{lo}..", end="", flush=True, file=STDERR)
-                    trees = self.ex.map(self.get_tree, url, range(lo, hi))
-                    yield from chain.from_iterable(map(xpath, trees))
-                    lo = hi
-            except LastPageReached as e:
-                print(e, file=STDERR)
-
-    def get_keyword(self):
-        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
-        f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
-        r = self._scrape(self.xpath, **self.western)
-        return Counter(m[1].lower() for m in map(f, r) if m).items()
-
-    def _scrape_id(self):
-        return self._scrape(self.xpath, **self.jav)
-
-
-class JavDBScraper(JavBusScraper):
-
-    NAME = "JavDB"
-    STEP = 100
-    XP = ('//section/div[@class="container"]//ul[@class="pagination-list"]/li'
-          '/a[contains(@class, "is-current") and normalize-space()=$page]')
-
-    def get_tree(self, url: str, i: int):
-        tree = html_fromstring(_request(url, params={"page": i}).content)
-        if self.xpath(tree, page=i):
-            return tree
-        raise LastPageReached(i)
-
-    def get_keyword(self) -> Iterable[Tuple[str, int]]:
-        print(f'{self.NAME}: Scanning keywords...', file=STDERR)
-        matcher = re.compile(r"[a-z0-9]{3,}").fullmatch
-        searcher = re.compile(r"\d+").search
-        xpath = '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]'
-
-        for a in self._scrape(xpath, **self.western):
-            title = a.findtext("strong").replace(" ", "").lower()
-            if matcher(title):
-                try:
-                    yield title, int(searcher(a.findtext("span"))[0])
-                except TypeError:
-                    pass
-
-    def _scrape_id(self) -> Iterator[str]:
-        xpath = './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()'
-        return self._scrape(xpath, **self.jav)
-
-
 class OnlineJsonScraper(Scraper):
 
+    ID_RE = r"\s*([a-z]{3,8})[_-]?(\d{2,8})[a-z]?\s*"
     NAME = "Online JSON"
-
-    def __init__(self, ex, config: List[str]) -> None:
-        super().__init__(ex)
-        self.config = config
+    URL = "https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"
 
     def _scrape_id(self) -> Iterable[str]:
-        if len(self.config) == 1:
-            return _request(self.config[0]).json()
-        return self._get_id_multifiles()
-
-    def _get_id_multifiles(self) -> Iterable[str]:
-        for ft in as_completed(
-                self.ex.submit(_request, u) for u in self.config):
-            yield from ft.result().json()
+        return _request(self.URL).json()
 
 
-class LocalJSONLoader(OnlineJsonScraper):
+class MGSJsonLoader(Scraper):
 
     ID_RE = r"\s*\d*([a-z]{3,8})[_-]?(\d{2,8})\s*"
     NAME = "Local JSON"
 
-    def _scrape_id(self) -> Iterable[str]:
-        if len(self.config) == 1:
-            with open(self.config[0], "r", encoding="utf-8") as f:
-                return json.load(f)
-        return self._get_id_multifiles()
+    def __init__(self, path) -> None:
+        super().__init__()
+        self.path = path
 
-    def _get_id_multifiles(self) -> Iterable[str]:
-        for path in self.config:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            yield from data
+    def _scrape_id(self) -> Iterable[str]:
+        if not self.path:
+            return ()
+        with open(self.path, "r", encoding="utf-8") as f:
+            return json.load(f)
 
 
 class MTeamCollector:
 
+    DOMAIN = "https://pt.m-team.cc"
+
     def __init__(self, *, username: str, password: str, page_max: int,
-                 cache_dir: str, domain: str, av_page: str,
-                 non_av_page: str) -> None:
+                 cache_dir: str, av_page: str, non_av_page: str) -> None:
 
         self._account = {"username": username, "password": password}
         self._page_max = page_max
@@ -231,14 +233,14 @@ class MTeamCollector:
             op.join(cache_dir, "non_av"),
             op.join(cache_dir, "av"),
         )
-        self.domain = domain
-        self._urls = (urljoin(domain, non_av_page), urljoin(domain, av_page))
-
+        self._urls = (
+            urljoin(self.DOMAIN, non_av_page),
+            urljoin(self.DOMAIN, av_page),
+        )
         for cache_dir in self._cache_dirs:
             os.makedirs(cache_dir, exist_ok=True)
 
     def from_cache(self, is_av: bool) -> Iterator[str]:
-
         matcher = re.compile(r"[0-9]+\.txt").fullmatch
         with os.scandir(self._cache_dirs[is_av]) as it:
             for entry in it:
@@ -256,10 +258,9 @@ class MTeamCollector:
         total = self._page_max
         step = frozenset(range(1, total, (total // 10) or 1))
         matcher = re.compile(r"\bid=([0-9]+)").search
-        xpath = XPath(
+        xpath = xp_compile(
             '//form[@id="form_torrent"]//table[@class="torrentname"]'
-            '/descendant::a[contains(@href, "download.php?")][1]/@href',
-            smart_strings=False)
+            '/descendant::a[contains(@href, "download.php?")][1]/@href')
 
         print(f"Scanning mteam ({total} pages)...",
               end="",
@@ -285,7 +286,7 @@ class MTeamCollector:
                     if exists(path):
                         yield path
                     else:
-                        url = urljoin(self.domain, link)
+                        url = urljoin(self.DOMAIN, link)
                         pool[ex.submit(_request, url)] = url, path
             print(total, file=STDERR)
 
@@ -312,9 +313,9 @@ class MTeamCollector:
             if "/login.php" in r.url:
                 print("login...", end="", flush=True)
                 session.post(
-                    url=urljoin(self.domain, "/takelogin.php"),
+                    url=urljoin(self.DOMAIN, "/takelogin.php"),
                     data=self._account,
-                    headers={"referer": urljoin(self.domain, "/login.php")},
+                    headers={"referer": urljoin(self.DOMAIN, "/login.php")},
                 )
                 r = session.head(self._urls[0], allow_redirects=True)
                 r.raise_for_status()
@@ -333,9 +334,9 @@ class MTeamCollector:
         except OSError:
             raise
         except Exception as e:
-            self._parse_torrent2(content, path, e=e)
+            self._parse_torrent2(e, content, path)
 
-    def _parse_torrent2(self, content: bytes, path: str, e: Exception):
+    def _parse_torrent2(self, e: Exception, content: bytes, path: str):
 
         torrent_file = path + ".torrent"
         try:
@@ -360,6 +361,7 @@ class MTeamCollector:
                 os.unlink(torrent_file)
             except OSError:
                 pass
+
         spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
         files = spliter.findall(files, files.index("\n\nFILES\n\n"))
         if not files:
@@ -368,7 +370,7 @@ class MTeamCollector:
             f.writelines(i.lower() + "\n" for i in files)
 
     @staticmethod
-    def _skip(*args, e: Exception = None):
+    def _skip(e=None, *args):
         if e is not None:
             raise e
 
@@ -376,25 +378,24 @@ class MTeamCollector:
 class Builder:
 
     def __init__(self, *, regex_file: str, keyword_max: int, prefix_max: int,
-                 **kwargs) -> None:
+                 mgs_json: str, **kwargs) -> None:
 
         self._regex_file = regex_file
         self._keyword_max = keyword_max
         self._prefix_max = prefix_max
-        self._config = kwargs
+        self._mgs_json = mgs_json
         self._datafile = "data.json"
         self._customfile = "custom.yaml"
 
     def from_web(self) -> Optional[str]:
 
-        config = self._config
         with ThreadPoolExecutor() as ex:
             scrapers = (
-                JavBusScraper(ex, **config["javbus"]),
-                JavDBScraper(ex, **config["javdb"]),
+                JavBusScraper(ex),
+                JavDBScraper(ex),
                 DMMScraper(ex),
-                OnlineJsonScraper(ex, config["online_json"]),
-                LocalJSONLoader(ex, config["local_json"]),
+                OnlineJsonScraper(),
+                MGSJsonLoader(self._mgs_json),
             )
             data = {
                 "keyword": self._scrape_keyword(scrapers),
@@ -726,6 +727,10 @@ class Analyzer:
             yield x
 
 
+def xp_compile(path: str):
+    return XPath(path, regexp=False, smart_strings=False)
+
+
 def get_freq_words(lo=3, k: int = 3000):
     """Get wordlist of the top `k` English words longer than `lo` letters."""
     u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
@@ -783,7 +788,7 @@ def parse_config(configfile: str) -> dict:
         a = op.normpath
         b = op.expanduser
         config["regex_file"] = a(b(config["regex_file"]))
-        config["local_json"][:] = (a(b(p)) for p in config["local_json"])
+        config["mgs_json"] = a(b(config["mgs_json"]))
         config["mteam"]["cache_dir"] = a(b(config["mteam"]["cache_dir"]))
     except FileNotFoundError:
         pass
@@ -796,28 +801,12 @@ def parse_config(configfile: str) -> dict:
         "regex_file": "regex.txt",
         "keyword_max": 150,
         "prefix_max": 3500,
-        "local_json": [],
-        "online_json": ["https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"],
-        "javbus": {
-            "western": {
-                "domain": "https://www.javbus.org",
-                "pages": ["/page", "/studio/1", "/studio/2", "/studio/3", "/studio/4"],
-            },
-            "jav": {
-                "domain": "https://www.javbus.com",
-                "pages": ["/page", "/uncensored/page", "/genre/hd", "/uncensored/genre/hd"],
-            },
-        },
-        "javdb": {
-            "western": {"domain": "https://javdb.com", "pages": ["/series/western"]},
-            "jav": {"domain": "https://javdb.com", "pages": ["/uncensored", "/"]},
-        },
+        "mgs_json": "",
         "mteam": {
             "username": "",
             "password": "",
             "page_max": 500,
             "cache_dir": "cache",
-            "domain": "https://pt.m-team.cc",
             "av_page": "/adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
             "non_av_page": "/torrents.php",
         },
