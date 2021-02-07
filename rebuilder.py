@@ -291,9 +291,14 @@ class MTeamCollector:
                         pool[ex.submit(_request, url)] = url, path
             print(total, file=STDERR)
 
+            idx = 0
+            total = len(pool)
+            fmt = f"[{{:{len(str(total))}d}}/{total}] {{}}".format
+
             for ft in as_completed(pool):
                 url, path = pool[ft]
-                print(f"Downloading: {url}", file=STDERR)
+                idx += 1
+                print(fmt(idx, url), file=STDERR)
                 try:
                     self._parse_torrent(ft.result().content, path)
                 except requests.RequestException as e:
