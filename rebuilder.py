@@ -462,7 +462,7 @@ class Builder:
             print("Generating regex failed.", file=STDERR)
             return
 
-        regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?[0-9]{{2,8}})([^a-z0-9]|$)"
+        regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?{RE_G2})([^a-z0-9]|$)"
         self._update_file(self._regex_file, regex)
 
         print(f"Result: {len(regex)} chars", file=STDERR)
@@ -597,7 +597,7 @@ class Analyzer:
             r"(?:^|/)([0-9]{,3}([a-z]{2,10})"
             r"(?:-[0-9]{2,8}|[0-9]{2,8}[hm]hb[0-9]{,2}))\b.*$",
             flags=re.M).findall
-        word_finder = re.compile(r"\b([a-z]{2,})(?:[ ._-]|\b)", re.M).finditer
+        word_finder = re.compile(r"(?:\b|_)([a-z]{3,})(?:\b|_)", re.M).findall
 
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=True)
@@ -605,7 +605,7 @@ class Analyzer:
         with ProcessPoolExecutor() as ex, \
              open(raw_file, "w", encoding="utf-8") as f:
 
-            freq_words = ex.submit(get_freq_words, 2)
+            freq_words = ex.submit(get_freq_words)
             for content in ex.map(self._match_av, paths, chunksize=100):
                 total += 1
                 if content:
@@ -618,15 +618,7 @@ class Analyzer:
                     prefix_count.update(tmp)
                     tmp.clear()
 
-                    lastend = lastword = None
-                    for m in word_finder(content):
-                        word = m[1]
-                        tmp_add(word)
-                        start, end = m.span()
-                        if start == lastend:
-                            tmp_add(f"{lastword} {word}")
-                        lastend = end
-                        lastword = word
+                    tmp.update(word_finder(content))
                     word_count.update(tmp)
                     tmp.clear()
             freq_words = freq_words.result()
