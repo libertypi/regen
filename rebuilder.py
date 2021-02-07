@@ -252,11 +252,11 @@ class MTeamCollector:
 
         url = self._urls[is_av]
         cache_dir = self._cache_dirs[is_av]
-        join = op.join
-        exists = op.exists
         pool = {}
         idx = 0
         total = self._page_max
+        join = op.join
+        exists = op.exists
         step = frozenset(range(1, total, (total // 10) or 1))
         matcher = re.compile(r"\bid=([0-9]+)").search
         xpath = xp_compile(
@@ -279,15 +279,15 @@ class MTeamCollector:
                 if idx in step:
                     print(f"{idx}..", end="", flush=True, file=STDERR)
 
-                for link in xpath(html_fromstring(ft.result().content)):
+                for url in xpath(html_fromstring(ft.result().content)):
                     try:
-                        path = join(cache_dir, matcher(link)[1] + ".txt")
+                        path = join(cache_dir, matcher(url)[1] + ".txt")
                     except TypeError:
                         continue
                     if exists(path):
                         yield path
                     else:
-                        url = urljoin(self.DOMAIN, link)
+                        url = urljoin(self.DOMAIN, url)
                         pool[ex.submit(_request, url)] = url, path
             print(total, file=STDERR)
 
@@ -304,9 +304,7 @@ class MTeamCollector:
                 except requests.RequestException as e:
                     print(e, file=STDERR)
                 except Exception as e:
-                    if hasattr(e, "stderr") and e.stderr:
-                        e = e.stderr
-                    print(f"Error: {e}", file=STDERR)
+                    print(getattr(e, "stderr", "").strip() or e, file=STDERR)
                     try:
                         os.unlink(path)
                     except OSError:
