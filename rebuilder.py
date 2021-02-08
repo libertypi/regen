@@ -25,9 +25,9 @@ from torrentool.api import Torrent
 from regen import Regen
 
 STDERR = sys.stderr
-session = None
 RE_G1 = r"[a-z]{3,10}"
 RE_G2 = r"[0-9]{2,8}"
+session = None
 
 
 class LastPageReached(Exception):
@@ -589,7 +589,6 @@ class Analyzer:
         prefix_count = Counter()
         word_count = Counter()
         tmp = set()
-        tmp_add = tmp.add
         prefix_finder = re.compile(
             r"(?:^|/)([0-9]{,3}([a-z]{2,10})"
             r"(?:-[0-9]{2,8}|[0-9]{2,8}[hm]hb[0-9]{,2}))\b.*$",
@@ -602,7 +601,7 @@ class Analyzer:
         with ProcessPoolExecutor() as ex, \
              open(raw_file, "w", encoding="utf-8") as f:
 
-            freq_words = ex.submit(get_freqwords)
+            freqwords = ex.submit(get_freqwords)
             for content in ex.map(self._match_av, paths, chunksize=100):
                 total += 1
                 if content:
@@ -611,21 +610,21 @@ class Analyzer:
                     f.write("---\n")
                     for string, prefix in prefix_finder(content):
                         strings[prefix].add(string)
-                        tmp_add(prefix)
+                        tmp.add(prefix)
                     prefix_count.update(tmp)
                     tmp.clear()
 
                     tmp.update(word_finder(content))
                     word_count.update(tmp)
                     tmp.clear()
-            freq_words = freq_words.result()
+            freqwords = freqwords.result()
 
         prefix_count = [
             (i, k, strings[k]) for k, i in prefix_count.items() if i >= 5
         ]
         word_count = [(i, k)
                       for k, i in word_count.items()
-                      if i >= 5 and k not in freq_words]
+                      if i >= 5 and k not in freqwords]
 
         f = lambda t: (-t[0], t[1])
         prefix_count.sort(key=f)
