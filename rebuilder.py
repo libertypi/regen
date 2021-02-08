@@ -387,6 +387,14 @@ class Builder:
         self._datafile = "data.json"
         self._customfile = "custom.yaml"
 
+    def from_cache(self) -> Optional[str]:
+        try:
+            with open(self._datafile, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            sys.exit(e)
+        return self._build(data)
+
     def from_web(self) -> Optional[str]:
 
         with ThreadPoolExecutor() as ex:
@@ -398,38 +406,28 @@ class Builder:
                 MGSJsonLoader(self._mgs_json),
             )
             data = {
-                "keyword": self._scrape_keyword(scrapers),
+                "keyword": self._scrape_keyword(scrapers, ex),
                 "prefix": self._scrape_prefix(scrapers),
             }
         with open(self._datafile, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
         return self._build(data)
 
-    def from_cache(self) -> Optional[str]:
-
-        try:
-            with open(self._datafile, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, ValueError) as e:
-            sys.exit(e)
-        return self._build(data)
-
-    def _scrape_keyword(self, scrapers: Tuple[Scraper]) -> Dict[str, int]:
-
+    def _scrape_keyword(self, scrapers, ex) -> Dict[str, int]:
         d = {}
         setdefault = d.setdefault
-        freq = get_freq_words()
-
+        freq = ex.submit(get_freqwords)
         for s in scrapers:
             if not hasattr(s, "get_keyword"):
                 continue
             for k, v in s.get_keyword():
-                if k not in freq and setdefault(k, v) < v:
+                if setdefault(k, v) < v:
                     d[k] = v
+        for k in freq.result().intersection(d):
+            del d[k]
         return self._sort_scrape(d.items())
 
     def _scrape_prefix(self, scrapers: Tuple[Scraper]) -> Dict[str, int]:
-
         d = defaultdict(set)
         for s in scrapers:
             for m in s.get_id():
@@ -604,7 +602,7 @@ class Analyzer:
         with ProcessPoolExecutor() as ex, \
              open(raw_file, "w", encoding="utf-8") as f:
 
-            freq_words = ex.submit(get_freq_words)
+            freq_words = ex.submit(get_freqwords)
             for content in ex.map(self._match_av, paths, chunksize=100):
                 total += 1
                 if content:
@@ -766,7 +764,7 @@ def get_tree(url: str, **kwargs) -> HtmlElement:
     return html_fromstring(response.content, base_url=response.url)
 
 
-def get_freq_words(lo=3, k: int = 3000):
+def get_freqwords(lo=3, k: int = 3000):
     """Get wordlist of the top `k` English words longer than `lo` letters."""
     u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
     m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$", get_response(u).text, re.M)
