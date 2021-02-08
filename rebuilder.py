@@ -218,14 +218,14 @@ class AVEScraper(Scraper):
                 '/a/@href[contains(., "studio_products.aspx")]',
                 smart_string=False))
 
-        total = len(url) + 1
-        step = frozenset(range(1, total, (total // 10) or 1))
         pool = []
-        print(f"  stage 1 ({total}): 1..", end="", flush=True, file=STDERR)
+        total = len(url)
+        step = frozenset(range(1, total, (total // 10) or 1))
+        print(f"  stage 1 ({total}): ", end="", file=STDERR)
 
         m = {"Rows": 3}
         url = as_completed(submit(get_tree, u, params=m) for u in url)
-        for i, tree in enumerate(url, 2):
+        for i, tree in enumerate(url, 1):
             if i in step:
                 print(f"{i}..", end="", flush=True, file=STDERR)
             tree = tree.result()
