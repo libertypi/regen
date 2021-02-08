@@ -86,9 +86,8 @@ class JavBusScraper(Scraper):
                     yield from chain.from_iterable(map(xpath, trees))
                     lo = hi
             except LastPageReached as e:
-                e = e.args[0]
                 print(e, file=STDERR)
-                if e == 1:
+                if e.args[0] == 1:
                     break
 
     def get_keyword(self):
