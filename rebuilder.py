@@ -11,7 +11,7 @@ import sys
 from collections import Counter, defaultdict
 from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
                                 as_completed)
-from itertools import chain, filterfalse, islice, repeat, tee
+from itertools import chain, count, filterfalse, islice, repeat, tee
 from operator import itemgetter
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urljoin, urlsplit
@@ -36,14 +36,13 @@ class LastPageReached(Exception):
 
 class Scraper:
 
-    ID_RE = rf"^\s*({RE_G1})[_-]?({RE_G2})\s*$"
+    ID_RE = rf"\s*({RE_G1})[_-]?({RE_G2})\s*"
+    ID_FULLMATCH = True
     ex: ThreadPoolExecutor
 
-    def get_tree(self, url: str, i: int) -> HtmlElement:
-        raise NotImplementedError
-
     def get_id(self) -> Iterator[re.Match]:
-        r = re.compile(self.ID_RE).search
+        r = re.compile(self.ID_RE)
+        r = r.fullmatch if self.ID_FULLMATCH else r.search
         return filter(None, map(r, map(str.lower, self._scrape_id())))
 
     def _scrape_id(self) -> Iterator[str]:
@@ -62,13 +61,14 @@ class JavBusScraper(Scraper):
     @staticmethod
     def get_tree(url: str, i: int):
         try:
-            return html_fromstring(_request(f"{url}{i}").content)
+            return get_tree(f"{url}{i}")
         except requests.HTTPError as e:
             if e.response.status_code == 404:
                 raise LastPageReached(i)
             raise
 
-    def _scrape(self, xpath: Union[XPath, str], domain: str, pages: Tuple[str]):
+    def _scrape(self, xpath: Union[XPath, str], domain: str,
+                pages: Iterable[str]):
 
         print(f"Scanning {urlsplit(domain).netloc} ...", file=STDERR)
         if isinstance(xpath, str):
@@ -86,15 +86,16 @@ class JavBusScraper(Scraper):
                     yield from chain.from_iterable(map(xpath, trees))
                     lo = hi
             except LastPageReached as e:
+                e = e.args[0]
                 print(e, file=STDERR)
+                if e == 1:
+                    break
 
     def get_keyword(self):
-
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
-            pages=("/page/", "/studio/1/", "/studio/2/", "/studio/3/",
-                   "/studio/4/"),
+            pages=chain(("/page/",), (f"/studio/{i}/" for i in count(1))),
         )
         f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         return Counter(m[1].lower() for m in map(f, r) if m).items()
@@ -115,7 +116,7 @@ class JavDBScraper(JavBusScraper):
           '/a[contains(@class, "is-current") and normalize-space()=$page]')
 
     def get_tree(self, url: str, i: int):
-        tree = html_fromstring(_request(f"{url}?page={i}").content)
+        tree = get_tree(f"{url}?page={i}")
         if self.xpath(tree, page=i):
             return tree
         raise LastPageReached(i)
@@ -127,7 +128,7 @@ class JavDBScraper(JavBusScraper):
             domain="https://javdb.com",
             pages=("/series/western",),
         )
-        re_title = re.compile(r"[a-z0-9]{3,}").fullmatch
+        re_title = re.compile(r"(?!\d+$)[a-z0-9]{3,}").fullmatch
         re_digit = re.compile(r"\d+").search
 
         for a in result:
@@ -149,14 +150,10 @@ class JavDBScraper(JavBusScraper):
 class DMMScraper(Scraper):
 
     ID_RE = rf"/cid=(?:[a-z]+_)?\d*({RE_G1})({RE_G2})[a-z]?/"
+    ID_FULLMATCH = False
 
     def __init__(self, ex) -> None:
         self.ex = ex
-
-    @staticmethod
-    def get_tree(url: str) -> HtmlElement:
-        r = _request(url)
-        return html_fromstring(r.content, base_url=r.url)
 
     def _scrape_id(self):
 
@@ -166,17 +163,17 @@ class DMMScraper(Scraper):
         )
         print(f"Scanning {urlsplit(url[0]).netloc} ...", file=STDERR)
 
-        xpath = xp_compile(
-            'string(.//div[@class="list-capt"]//li[@class="terminal"]'
-            '/a/@href[contains(., "/page=")])')
-        get_tree = self.get_tree
+        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
+                           '//tr/td[1]/p[@class="ttl"]/a/@href')
         submit = self.ex.submit
 
         pool = [submit(get_tree, u) for u in url]
         for ft in as_completed(pool):
             tree = ft.result()
-            i = re.fullmatch(r"(.*/page=)(\d+)(/.*)",
-                             urljoin(tree.base_url, xpath(tree)))
+            i = tree.xpath(
+                'string(.//div[@class="list-capt"]//li[@class="terminal"]'
+                '/a/@href[contains(., "/page=")])')
+            i = re.fullmatch(r"(.*/page=)(\d+)(/.*)", urljoin(tree.base_url, i))
             url = f"{i[1]}{{}}{i[3]}".format
             i = range(2, int(i[2]) + 1)
             pool.extend(submit(get_tree, url(j)) for j in i)
@@ -185,8 +182,6 @@ class DMMScraper(Scraper):
         total = len(pool)
         step = frozenset(range(1, total, (total // 10) or 1))
         pool = as_completed(pool)
-        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
-                           '//tr/td[1]/p[@class="ttl"]/a/@href')
 
         for i, ft in enumerate(pool, 1):
             if i in step:
@@ -201,12 +196,12 @@ class OnlineJsonScraper(Scraper):
     def _scrape_id() -> Iterable[str]:
         url = "https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"
         print(f"Scanning {urlsplit(url).netloc} ...", file=STDERR)
-        return _request(url).json()
+        return get_response(url).json()
 
 
 class MGSJsonLoader(Scraper):
 
-    ID_RE = rf"^\s*\d*({RE_G1})-({RE_G2})\s*$"
+    ID_RE = rf"\d*({RE_G1})-({RE_G2})"
 
     def __init__(self, path) -> None:
         self.path = path
@@ -271,14 +266,14 @@ class MTeamCollector:
         with ThreadPoolExecutor() as ex:
 
             for ft in as_completed(
-                    ex.submit(_request, url, params={"page": i})
+                    ex.submit(get_tree, url, params={"page": i})
                     for i in range(1, total + 1)):
 
                 idx += 1
                 if idx in step:
                     print(f"{idx}..", end="", flush=True, file=STDERR)
 
-                for url in xpath(html_fromstring(ft.result().content)):
+                for url in xpath(ft.result()):
                     try:
                         path = join(cache_dir, matcher(url)[1] + ".txt")
                     except TypeError:
@@ -287,7 +282,7 @@ class MTeamCollector:
                         yield path
                     else:
                         url = urljoin(self.DOMAIN, url)
-                        pool[ex.submit(_request, url)] = url, path
+                        pool[ex.submit(get_response, url)] = url, path
             print(total, file=STDERR)
 
             idx = 0
@@ -318,9 +313,9 @@ class MTeamCollector:
             if "/login.php" in r.url:
                 print("login...", end="", flush=True)
                 session.post(
-                    url=urljoin(self.DOMAIN, "/takelogin.php"),
+                    url=self.DOMAIN + "/takelogin.php",
                     data=self._account,
-                    headers={"referer": urljoin(self.DOMAIN, "/login.php")},
+                    headers={"referer": self.DOMAIN + "/login.php"},
                 )
                 r = session.head(self._urls[0], allow_redirects=True)
                 r.raise_for_status()
@@ -724,23 +719,6 @@ class Analyzer:
             yield x
 
 
-def xp_compile(path: str):
-    return XPath(path, regexp=False, smart_strings=False)
-
-
-def get_freq_words(lo=3, k: int = 3000):
-    """Get wordlist of the top `k` English words longer than `lo` letters."""
-    u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$", _request(u).text, re.M)
-    return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
-
-
-def _request(url: str, **kwargs):
-    response = session.get(url, timeout=(9.1, 60), **kwargs)
-    response.raise_for_status()
-    return response
-
-
 def init_session(path: str):
 
     from urllib3 import Retry
@@ -776,9 +754,32 @@ def init_session(path: str):
             ))
 
 
+def get_response(url: str, **kwargs) -> requests.Response:
+    response = session.get(url, timeout=(9.1, 60), **kwargs)
+    response.raise_for_status()
+    return response
+
+
+def get_tree(url: str, **kwargs) -> HtmlElement:
+    response = session.get(url, timeout=(9.1, 60), **kwargs)
+    response.raise_for_status()
+    return html_fromstring(response.content, base_url=response.url)
+
+
+def get_freq_words(lo=3, k: int = 3000):
+    """Get wordlist of the top `k` English words longer than `lo` letters."""
+    u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
+    m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$", get_response(u).text, re.M)
+    return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
+
+
 def dump_cookies(path: str):
     with open(path, "wb") as f:
         pickle.dump(session.cookies, f)
+
+
+def xp_compile(path: str):
+    return XPath(path, regexp=False, smart_strings=False)
 
 
 def parse_config(configfile: str) -> dict:
