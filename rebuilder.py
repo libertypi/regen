@@ -146,49 +146,6 @@ class JavDBScraper(JavBusScraper):
         )
 
 
-class DMMScraper(Scraper):
-
-    ID_RE = rf"/cid=(?:[a-z]+_)?\d*({RE_G1})({RE_G2})[a-z]?/"
-    ID_FULLMATCH = False
-
-    def __init__(self, ex) -> None:
-        self.ex = ex
-
-    def _scrape_id(self):
-
-        url = (
-            "https://www.dmm.co.jp/digital/videoa/-/list/=/sort=release_date/view=text/",
-            "https://www.dmm.co.jp/digital/videoc/-/list/=/sort=release_date/view=text/",
-        )
-        print(f"Scanning {urlsplit(url[0]).netloc} ...", file=STDERR)
-
-        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
-                           '//tr/td[1]/p[@class="ttl"]/a/@href')
-        submit = self.ex.submit
-
-        pool = [submit(get_tree, u) for u in url]
-        for ft in as_completed(pool):
-            tree = ft.result()
-            i = tree.xpath(
-                'string(.//div[@class="list-capt"]//li[@class="terminal"]'
-                '/a/@href[contains(., "/page=")])')
-            i = re.fullmatch(r"(.*/page=)(\d+)(/.*)", urljoin(tree.base_url, i))
-            url = f"{i[1]}{{}}{i[3]}".format
-            i = range(2, int(i[2]) + 1)
-            pool.extend(submit(get_tree, url(j)) for j in i)
-
-        total = len(pool)
-        step = frozenset(range(1, total, (total // 10) or 1))
-        pool = as_completed(pool)
-        print(f"  total ({total}): ", end="", file=STDERR)
-
-        for i, ft in enumerate(pool, 1):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
-            yield from xpath(ft.result())
-        print(total, file=STDERR)
-
-
 class AVEScraper(Scraper):
 
     ID_RE = rf".+?:\s*({RE_G1})[_-]?({RE_G2})\s*"
@@ -246,6 +203,49 @@ class AVEScraper(Scraper):
             if i in step:
                 print(f"{i}..", end="", flush=True, file=STDERR)
             yield from id_xp(tree.result())
+        print(total, file=STDERR)
+
+
+class DMMScraper(Scraper):
+
+    ID_RE = rf"/cid=(?:[a-z]+_)?\d*({RE_G1})({RE_G2})[a-z]?/"
+    ID_FULLMATCH = False
+
+    def __init__(self, ex) -> None:
+        self.ex = ex
+
+    def _scrape_id(self):
+
+        url = (
+            "https://www.dmm.co.jp/digital/videoa/-/list/=/sort=release_date/view=text/",
+            "https://www.dmm.co.jp/digital/videoc/-/list/=/sort=release_date/view=text/",
+        )
+        print(f"Scanning {urlsplit(url[0]).netloc} ...", file=STDERR)
+
+        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
+                           '//tr/td[1]/p[@class="ttl"]/a/@href')
+        submit = self.ex.submit
+
+        pool = [submit(get_tree, u) for u in url]
+        for ft in as_completed(pool):
+            tree = ft.result()
+            i = tree.xpath(
+                'string(.//div[@class="list-capt"]//li[@class="terminal"]'
+                '/a/@href[contains(., "/page=")])')
+            i = re.fullmatch(r"(.*/page=)(\d+)(/.*)", urljoin(tree.base_url, i))
+            url = f"{i[1]}{{}}{i[3]}".format
+            i = range(2, int(i[2]) + 1)
+            pool.extend(submit(get_tree, url(j)) for j in i)
+
+        total = len(pool)
+        step = frozenset(range(1, total, (total // 10) or 1))
+        pool = as_completed(pool)
+        print(f"  total ({total}): ", end="", file=STDERR)
+
+        for i, ft in enumerate(pool, 1):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            yield from xpath(ft.result())
         print(total, file=STDERR)
 
 
