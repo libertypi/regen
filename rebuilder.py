@@ -177,10 +177,10 @@ class DMMScraper(Scraper):
             i = range(2, int(i[2]) + 1)
             pool.extend(submit(get_tree, url(j)) for j in i)
 
-        print("  /page: ", end="", file=STDERR)
         total = len(pool)
         step = frozenset(range(1, total, (total // 10) or 1))
         pool = as_completed(pool)
+        print(f"  total ({total}): ", end="", file=STDERR)
 
         for i, ft in enumerate(pool, 1):
             if i in step:
@@ -189,13 +189,64 @@ class DMMScraper(Scraper):
         print(total, file=STDERR)
 
 
-class OnlineJsonScraper(Scraper):
+class AVEScraper(Scraper):
 
-    @staticmethod
-    def _scrape_id() -> Iterable[str]:
-        url = "https://raw.githubusercontent.com/imfht/fanhaodaquan/master/data/codes.json"
+    ID_RE = rf".+?:\s*({RE_G1})[_-]?({RE_G2})\s*"
+
+    def __init__(self, ex) -> None:
+        self.ex = ex
+
+    def _scrape_id(self):
+
+        url = "https://www.aventertainments.com/studiolists.aspx"
         print(f"Scanning {urlsplit(url).netloc} ...", file=STDERR)
-        return get_response(url).json()
+
+        page_xp = xp_compile('string(//div[@class="pagination-rev"]'
+                             '/ul/li[a/@title="Next"]'
+                             '/preceding-sibling::li[1]/a/@href)')
+        page_matcher = re.compile(r'(.*CountPage=)(\d+)(.*)', re.I).fullmatch
+        id_xp = xp_compile(
+            '//div[contains(@class, "single-slider-product--list")]'
+            '/small/text()')
+        submit = self.ex.submit
+
+        tree = get_tree(url)
+        url = tree.base_url
+        url = frozenset(
+            urljoin(url, u) for u in tree.xpath(
+                '//div[contains(@class, "category-group-list")]'
+                '/a/@href[contains(., "studio_products.aspx")]',
+                smart_string=False))
+
+        total = len(url) + 1
+        step = frozenset(range(1, total, (total // 10) or 1))
+        pool = []
+        print(f"  stage 1 ({total}): 1..", end="", flush=True, file=STDERR)
+
+        m = {"Rows": 3}
+        url = as_completed(submit(get_tree, u, params=m) for u in url)
+        for i, tree in enumerate(url, 2):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            tree = tree.result()
+            m = page_matcher(page_xp(tree))
+            if m:
+                url = f"{urljoin(tree.base_url, m[1])}{{}}{m[3]}".format
+                m = range(2, int(m[2]) + 1)
+                pool.extend(submit(get_tree, url(i)) for i in m)
+            yield from id_xp(tree)
+        print(total, file=STDERR)
+
+        total = len(pool)
+        step = frozenset(range(1, total, (total // 10) or 1))
+        print(f"  stage 2 ({total}): ", end="", file=STDERR)
+
+        pool = as_completed(pool)
+        for i, tree in enumerate(pool, 1):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            yield from id_xp(tree.result())
+        print(total, file=STDERR)
 
 
 class MGSJsonLoader(Scraper):
@@ -400,13 +451,13 @@ class Builder:
             scrapers = (
                 JavBusScraper(ex),
                 JavDBScraper(ex),
+                AVEScraper(ex),
                 DMMScraper(ex),
-                OnlineJsonScraper(),
                 MGSJsonLoader(self._mgs_json),
             )
             data = {
-                "keyword": self._scrape_keyword(scrapers, ex),
                 "prefix": self._scrape_prefix(scrapers),
+                "keyword": self._scrape_keyword(scrapers, ex),
             }
         with open(self._datafile, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4)
@@ -736,14 +787,15 @@ def init_session(path: str):
         with open(path, "rb") as f:
             session.cookies = pickle.load(f)
     except FileNotFoundError:
+        create_cookie = requests.cookies.create_cookie
         session.cookies.set_cookie(
-            requests.cookies.create_cookie(
+            create_cookie(
                 domain="www.javbus.com",
                 name="existmag",
                 value="all",
             ))
         session.cookies.set_cookie(
-            requests.cookies.create_cookie(
+            create_cookie(
                 domain="dmm.co.jp",
                 name="age_check_done",
                 value="1",
