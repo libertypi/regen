@@ -251,7 +251,7 @@ class AVEScraper(Scraper):
 
 class MGSJsonLoader(Scraper):
 
-    ID_RE = rf"\d*({RE_G1})-({RE_G2})"
+    ID_RE = rf"\d*({RE_G1})[_-]?({RE_G2})"
 
     def __init__(self, path) -> None:
         self.path = path
@@ -773,8 +773,9 @@ def init_session(path: str):
     global session
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:80.0) "
-                      "Gecko/20100101 Firefox/80.0"
+        "User-Agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                      'AppleWebKit/537.36 (KHTML, like Gecko) '
+                      'Chrome/88.0.4324.104 Safari/537.36'
     })
     adapter = requests.adapters.HTTPAdapter(
         max_retries=Retry(total=7,
@@ -849,7 +850,7 @@ def parse_config(configfile: str) -> dict:
     default = {
         "regex_file": "regex.txt",
         "keyword_max": 150,
-        "prefix_max": 3500,
+        "prefix_max": 3000,
         "mgs_json": "",
         "mteam": {
             "username": "",
