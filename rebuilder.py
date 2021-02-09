@@ -67,8 +67,11 @@ class JavBusScraper(Scraper):
                 raise LastPageReached(i)
             raise
 
-    def _scrape(self, xpath: Union[XPath, str], domain: str,
-                pages: Iterable[str]):
+    def _scrape(self,
+                xpath: Union[XPath, str],
+                domain: str,
+                pages: Iterable[str],
+                stop_null_page=False):
 
         print(f"Scanning {urlsplit(domain).netloc} ...", file=STDERR)
         if isinstance(xpath, str):
@@ -87,17 +90,8 @@ class JavBusScraper(Scraper):
                     lo = hi
             except LastPageReached as e:
                 print(e, file=STDERR)
-                if e.args[0] == 1:
+                if stop_null_page and e.args[0] == 1:
                     break
-
-    def get_keyword(self):
-        r = self._scrape(
-            self.xpath,
-            domain="https://www.javbus.org",
-            pages=chain(("/page/",), (f"/studio/{i}/" for i in count(1))),
-        )
-        f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
-        return Counter(m[1].lower() for m in map(f, r) if m).items()
 
     def _scrape_id(self):
         return self._scrape(
@@ -107,12 +101,22 @@ class JavBusScraper(Scraper):
                    "/uncensored/genre/hd/"),
         )
 
+    def get_keyword(self):
+        r = self._scrape(
+            self.xpath,
+            domain="https://www.javbus.org",
+            pages=chain(("/page/",), (f"/studio/{i}/" for i in count(1))),
+            stop_null_page=True,
+        )
+        f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
+        return Counter(m[1].lower() for m in map(f, r) if m).items()
+
 
 class JavDBScraper(JavBusScraper):
 
     STEP = 100
-    XP = ('//section/div[@class="container"]//ul[@class="pagination-list"]/li'
-          '/a[contains(@class, "is-current") and normalize-space()=$page]')
+    XP = ('boolean(//nav[@class="pagination"]/ul[@class="pagination-list"]/li'
+          '/a[contains(@class, "is-current") and number()=$page])')
 
     def get_tree(self, url: str, i: int):
         tree = get_tree(f"{url}?page={i}")
@@ -120,30 +124,30 @@ class JavDBScraper(JavBusScraper):
             return tree
         raise LastPageReached(i)
 
-    def get_keyword(self) -> Iterable[Tuple[str, int]]:
-
-        result = self._scrape(
-            '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
-            domain="https://javdb.com",
-            pages=("/series/western",),
-        )
-        re_title = re.compile(r"(?!\d+$)[a-z0-9]{3,}").fullmatch
-        re_digit = re.compile(r"\d+").search
-
-        for a in result:
-            title = a.findtext("strong").replace(" ", "").lower()
-            if re_title(title):
-                try:
-                    yield title, int(re_digit(a.findtext("span"))[0])
-                except TypeError:
-                    pass
-
     def _scrape_id(self) -> Iterator[str]:
         return self._scrape(
             './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
             domain="https://javdb.com",
-            pages=("/uncensored", "/"),
+            pages=("/", "/uncensored"),
         )
+
+    def get_keyword(self) -> Iterable[Tuple[str, int]]:
+        r = self._scrape(
+            '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
+            domain="https://javdb.com",
+            pages=("/series/western",),
+        )
+        subspace = re.compile(r"\s+").sub
+        retitle = re.compile(r"(?!\d+$)[a-z0-9]{3,}").fullmatch
+        redigit = re.compile(r"\d+").search
+
+        for a in r:
+            title = subspace("", a.findtext("strong")).lower()
+            if retitle(title):
+                try:
+                    yield title, int(redigit(a.findtext("span"))[0])
+                except TypeError:
+                    pass
 
 
 class AVEScraper(Scraper):
@@ -222,9 +226,9 @@ class DMMScraper(Scraper):
         )
         print(f"Scanning {urlsplit(url[0]).netloc} ...", file=STDERR)
 
+        submit = self.ex.submit
         xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
                            '//tr/td[1]/p[@class="ttl"]/a/@href')
-        submit = self.ex.submit
 
         pool = [submit(get_tree, u) for u in url]
         for ft in as_completed(pool):
@@ -239,9 +243,9 @@ class DMMScraper(Scraper):
 
         total = len(pool)
         step = frozenset(range(1, total, (total // 10) or 1))
-        pool = as_completed(pool)
-        print(f"  total ({total}): ", end="", file=STDERR)
+        print(f"  total ({total}): ", end="", flush=True, file=STDERR)
 
+        pool = as_completed(pool)
         for i, ft in enumerate(pool, 1):
             if i in step:
                 print(f"{i}..", end="", flush=True, file=STDERR)
@@ -435,7 +439,6 @@ class Builder:
         self._prefix_max = prefix_max
         self._mgs_json = mgs_json
         self._datafile = "data.json"
-        self._customfile = "custom.yaml"
 
     def from_cache(self) -> Optional[str]:
         try:
@@ -463,6 +466,13 @@ class Builder:
             json.dump(data, f, indent=4)
         return self._build(data)
 
+    def _scrape_prefix(self, scrapers: Tuple[Scraper]) -> Dict[str, int]:
+        d = defaultdict(set)
+        for s in scrapers:
+            for m in s.get_id():
+                d[m[1]].add(int(m[2]))
+        return self._sort_scrape(zip(d, map(len, d.values())))
+
     def _scrape_keyword(self, scrapers, ex) -> Dict[str, int]:
         d = {}
         setdefault = d.setdefault
@@ -476,13 +486,6 @@ class Builder:
         for k in freq.result().intersection(d):
             del d[k]
         return self._sort_scrape(d.items())
-
-    def _scrape_prefix(self, scrapers: Tuple[Scraper]) -> Dict[str, int]:
-        d = defaultdict(set)
-        for s in scrapers:
-            for m in s.get_id():
-                d[m[1]].add(int(m[2]))
-        return self._sort_scrape(zip(d, map(len, d.values())))
 
     @staticmethod
     def _sort_scrape(d: Iterable[Tuple[str, int]]):
@@ -610,18 +613,16 @@ class Analyzer:
                 regex = f.readline().strip()
                 if f.read():
                     raise ValueError("regex file should contain only one line")
-
             if "(?" in regex:
                 raise ValueError("regex should have no special groups")
-
             i = regex.index("(", 1)
             regex = "{}({}".format(regex[:i].replace("(", "(?:"),
                                    regex[i + 1:].replace("(", "(?:"))
-            self.matcher = re.compile(regex, flags=re.M).search
+            self.mt = re.compile(regex, flags=re.M).search
         except (OSError, ValueError) as e:
             sys.exit(e)
 
-        self.extfilter = re.compile(
+        self.ext = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|"
             r"avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
@@ -736,14 +737,13 @@ class Analyzer:
 
     def _match_av(self, path: str) -> Optional[str]:
         with open(path, "r", encoding="utf-8") as f:
-            a, b = tee(filter(self.extfilter, f))
-            if not any(map(self.matcher, a)):
+            a, b = tee(filter(self.ext, f))
+            if not any(map(self.mt, a)):
                 return "".join(b)
 
     def _match_nonav(self, path: str) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(
-                m[1] for m in map(self.matcher, filter(self.extfilter, f)) if m)
+            return tuple(m[1] for m in map(self.mt, filter(self.ext, f)) if m)
 
     def _format_report(self, total, count, title, result):
         f = self._slice_on_len
