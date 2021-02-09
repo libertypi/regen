@@ -25,8 +25,7 @@ from torrentool.api import Torrent
 from regen import Regen
 
 STDERR = sys.stderr
-RE_G1 = r"[a-z]{3,10}"
-RE_G2 = r"[0-9]{2,8}"
+JAVID_RE = r"([a-z]{3,10})[_-]?([0-9]{2,8})[abcrz]?"
 session = None
 
 
@@ -36,14 +35,25 @@ class LastPageReached(Exception):
 
 class Scraper:
 
-    ID_RE = rf"\s*({RE_G1})[_-]?({RE_G2})\s*"
-    ID_FULLMATCH = True
-    ex: ThreadPoolExecutor
+    __slots__ = "ex"
+    ID_RE = JAVID_RE
+    DATA_RE: str
+    DATAFILE: str
+
+    def __init__(self, ex: ThreadPoolExecutor) -> None:
+        self.ex = ex
 
     def get_id(self) -> Iterator[re.Match]:
-        r = re.compile(self.ID_RE)
-        r = r.fullmatch if self.ID_FULLMATCH else r.search
-        return filter(None, map(r, map(str.lower, self._scrape_id())))
+        data = map(re.compile(self.DATA_RE).search, self._scrape_id())
+        data = sorted(frozenset(map(itemgetter(1), filter(None, data))))
+        with open(op.join("data", self.DATAFILE), "w", encoding="utf-8") as f:
+            json.dump(data, f, separators=(",", ":"))
+        return self._filter_id(data)
+
+    def _filter_id(self, data: List[str]):
+        print(f"  entries: {len(data)}", file=STDERR)
+        r = re.compile(self.ID_RE).fullmatch
+        return filter(None, map(r, map(str.lower, data)))
 
     def _scrape_id(self) -> Iterator[str]:
         raise NotImplementedError
@@ -51,10 +61,13 @@ class Scraper:
 
 class JavBusScraper(Scraper):
 
+    __slots__ = "xpath"
+    DATA_RE = r"^\s*([A-Za-z0-9_-]+)\s*$"
+    DATAFILE = "javbus.json"
     STEP = 500
     XP = './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()'
 
-    def __init__(self, ex):
+    def __init__(self, ex: ThreadPoolExecutor) -> None:
         self.ex = ex
         self.xpath = xp_compile(self.XP)
 
@@ -114,6 +127,8 @@ class JavBusScraper(Scraper):
 
 class JavDBScraper(JavBusScraper):
 
+    __slots__ = ()
+    DATAFILE = "javdb.json"
     STEP = 100
     XP = ('boolean(//nav[@class="pagination"]/ul[@class="pagination-list"]/li'
           '/a[contains(@class, "is-current") and number()=$page])')
@@ -152,10 +167,9 @@ class JavDBScraper(JavBusScraper):
 
 class AVEScraper(Scraper):
 
-    ID_RE = rf".+?:\s*({RE_G1})[_-]?({RE_G2})\s*"
-
-    def __init__(self, ex) -> None:
-        self.ex = ex
+    __slots__ = ()
+    DATA_RE = r"^.+?:\s*([A-Za-z0-9_-]+)\s*$"
+    DATAFILE = "ave.json"
 
     def _scrape_id(self):
 
@@ -212,14 +226,12 @@ class AVEScraper(Scraper):
 
 class DMMScraper(Scraper):
 
-    ID_RE = rf"/cid=(?:[a-z]+_)?\d*({RE_G1})({RE_G2})[a-z]?/"
-    ID_FULLMATCH = False
-
-    def __init__(self, ex) -> None:
-        self.ex = ex
+    __slots__ = ()
+    DATA_RE = r"/cid=([A-Za-z0-9_-]+)/"
+    ID_RE = rf"(?:[a-z]+_)?\d*{JAVID_RE}"
+    DATAFILE = "dmm.json"
 
     def _scrape_id(self):
-
         url = (
             "https://www.dmm.co.jp/digital/videoa/-/list/=/sort=release_date/view=text/",
             "https://www.dmm.co.jp/digital/videoc/-/list/=/sort=release_date/view=text/",
@@ -255,18 +267,20 @@ class DMMScraper(Scraper):
 
 class MGSJsonLoader(Scraper):
 
-    ID_RE = rf"\d*({RE_G1})[_-]?({RE_G2})"
+    __slots__ = "datafile"
+    ID_RE = rf"\d*{JAVID_RE}"
 
-    def __init__(self, path) -> None:
-        self.path = path
+    def __init__(self, datafile: str) -> None:
+        self.datafile = datafile
 
-    def _scrape_id(self) -> Iterable[str]:
-        path = self.path
-        if not path:
+    def get_id(self):
+        datafile = self.datafile
+        if not datafile:
             return ()
-        print(f"Loading {op.basename(path)} ...", file=STDERR)
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+        print(f"Loading {op.basename(datafile)} ...", file=STDERR)
+        with open(datafile, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return self._filter_id(data)
 
 
 class MTeamCollector:
@@ -398,7 +412,7 @@ class MTeamCollector:
 
     def _transmission_show(self, e: Exception, content: bytes, path: str):
 
-        torrent_file = path + ".torrent"
+        torrent_file = path.rpartition(".")[0] + ".torrent"
         try:
             with open(torrent_file, "wb") as f:
                 f.write(content)
@@ -421,9 +435,14 @@ class MTeamCollector:
                 os.unlink(torrent_file)
             except OSError:
                 pass
-
-        spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
-        files = spliter.findall(files, files.index("\n\nFILES\n\n"))
+        try:
+            spliter = self._spliter
+        except AttributeError:
+            spliter = self._spliter = re.compile(
+                r"^\s+(.+) \([^)]+\)$",
+                flags=re.MULTILINE,
+            ).findall
+        files = spliter(files, files.index("\n\nFILES\n\n"))
         if not files:
             raise ValueError("torrent file seems empty")
         with open(path, "w", encoding="utf-8") as f:
@@ -443,14 +462,15 @@ class Builder:
         self._keyword_max = keyword_max
         self._prefix_max = prefix_max
         self._mgs_json = mgs_json
-        self._datafile = "data.json"
+        self._datafile = op.join("data", "frequency.json")
 
     def from_cache(self) -> Optional[str]:
         try:
             with open(self._datafile, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError) as e:
-            sys.exit(e)
+            sys.exit("Loading local cache failed. A full "
+                     f"web scrape may fix the problem.\n{e}")
         return self._build(data)
 
     def from_web(self) -> Optional[str]:
@@ -517,7 +537,10 @@ class Builder:
             print("Generating regex failed.", file=STDERR)
             return
 
-        regex = rf"(^|[^a-z0-9])({keyword}|[0-9]{{,3}}{prefix}[_-]?{RE_G2})([^a-z0-9]|$)"
+        regex = (
+            r"(^|[^a-z0-9])"
+            rf"({keyword}|[0-9]{{,5}}{prefix}[_-]?[0-9]{{2,8}}([abcrz]|f?hd)?)"
+            r"([^a-z0-9]|$)")
         self._update_file(self._regex_file, regex)
 
         print(f"Result: {len(regex)} chars", file=STDERR)
@@ -631,23 +654,28 @@ class Analyzer:
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|"
             r"avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
-        self.regex_file = regex_file
+
         self._mteam = MTeamCollector(**mteam)
+        self.regex_file = regex_file
+        self._reportdir = "report"
+        os.makedirs(self._reportdir, exist_ok=True)
 
     def analyze_av(self, local: bool = False):
 
         print("Matching test begins with av torrents...", file=STDERR)
 
-        report_file = op.abspath("av_report.txt")
-        raw_file = op.abspath("mismatch_raw.txt")
+        report_file = op.join(self._reportdir, "av_report.txt")
+        raw_file = op.join(self._reportdir, "mismatch_raw.txt")
         total = count = 0
         strings = defaultdict(set)
         prefix_count = Counter()
         word_count = Counter()
         tmp = set()
         prefix_finder = re.compile(
-            r"(?:^|/)([0-9]{,3}([a-z]{2,10})"
-            r"(?:-[0-9]{2,8}|[0-9]{2,8}[hm]hb[0-9]{,2}))\b.*$",
+            r"(?:^|/)([0-9]{,5}([a-z]{2,10})"
+            r"(?:-[0-9]{2,8}(?:[hm]hb[0-9]{,2}|f?hd|[a-z])?|"
+            r"[0-9]{2,8}(?:[hm]hb[0-9]{,2}|f?hd|[a-z]))"
+            r")\b.*$",
             flags=re.M).findall
         word_finder = re.compile(r"(?:\b|_)([a-z]{3,})(?:\b|_)", re.M).findall
 
@@ -697,14 +725,13 @@ class Analyzer:
                     f'{"torrent":>7}  word\n'
                     f'{"-" * 80}\n')
             f.writelines(f"{i:7d}  {j}\n" for i, j in word_count)
-
-        print(f"Result saved to: {report_file}", file=STDERR)
+        print(f"Result saved to: {op.abspath(report_file)}", file=STDERR)
 
     def analyze_nonav(self, local: bool = False):
 
         print("Matching test begins with non-av torrents...", file=STDERR)
 
-        report_file = op.abspath("nonav_report.txt")
+        report_file = op.join(self._reportdir, "nonav_report.txt")
         total = count = 0
         searcher = re.compile(r"[a-z]+").search
 
@@ -738,7 +765,7 @@ class Analyzer:
             for line in report:
                 print(line, end="")
                 f.write(line)
-        print(f"Result saved to: {report_file}", file=STDERR)
+        print(f"Result saved to: {op.abspath(report_file)}", file=STDERR)
 
     def _match_av(self, path: str) -> Optional[str]:
         with open(path, "r", encoding="utf-8") as f:
@@ -784,7 +811,7 @@ def init_session(path: str):
     })
     adapter = requests.adapters.HTTPAdapter(
         max_retries=Retry(total=7,
-                          status_forcelist=frozenset((500, 502, 503, 504)),
+                          status_forcelist=frozenset((500, 502, 503, 504, 521)),
                           backoff_factor=0.3))
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -793,6 +820,7 @@ def init_session(path: str):
         with open(path, "rb") as f:
             session.cookies = pickle.load(f)
     except FileNotFoundError:
+        os.makedirs("data", exist_ok=True)
         create_cookie = requests.cookies.create_cookie
         session.cookies.set_cookie(
             create_cookie(
@@ -954,13 +982,14 @@ def main():
         os.mkdir(config)
         os.chdir(config)
     config = parse_config("config.json")
-    init_session("cookies")
+
+    cookiefile = op.join("data", "cookies")
+    init_session(cookiefile)
 
     if args.file:
         config["regex_file"] = args.file
 
     if args.mode == "build":
-
         if args.keyword_max is not None:
             config["keyword_max"] = args.keyword_max
         if args.prefix_max is not None:
@@ -971,9 +1000,7 @@ def main():
             builder.from_cache()
         else:
             builder.from_web()
-
     else:
-
         if args.mteam_max is not None:
             config["mteam"]["page_max"] = args.mteam_max
 
@@ -983,7 +1010,7 @@ def main():
         else:
             analyzer.analyze_nonav(args.local)
 
-    dump_cookies("cookies")
+    dump_cookies(cookiefile)
 
 
 if __name__ == "__main__":
