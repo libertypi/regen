@@ -338,10 +338,6 @@ class MTeamCollector:
 
     def _scanpage(self, url: str, ex: ThreadPoolExecutor) -> Iterator[str]:
 
-        xpath = xp_compile(
-            '//form[@id="form_torrent"]//table[@class="torrentname"]'
-            '/descendant::a[contains(@href, "download.php?")][1]/@href')
-
         # mteam page indexes start at 0, display numbers should start at 1
         tree = self._login(url, params={"page": 0})
         total = tree.xpath(
@@ -350,13 +346,16 @@ class MTeamCollector:
         total = int(re.search(r"\bpage=(\d+)", total)[1]) + 1
         if 0 < self._page_max < total:
             total = self._page_max
-        step = frozenset(range(1, total, (total // 10) or 1))
-
-        print(f"Scanning mteam ({total}): 1..", end="", flush=True, file=STDERR)
         pool = as_completed({
             ex.submit(get_tree, url, params={"page": i})
             for i in range(1, total)
         })
+
+        print(f"Scanning mteam ({total}): 1..", end="", flush=True, file=STDERR)
+        step = frozenset(range(1, total, (total // 10) or 1))
+        xpath = xp_compile(
+            '//form[@id="form_torrent"]//table[@class="torrentname"]'
+            '/descendant::a[contains(@href, "download.php?")][1]/@href')
         yield from xpath(tree)
 
         for i, tree in enumerate(pool, 2):
