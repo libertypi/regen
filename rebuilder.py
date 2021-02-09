@@ -324,11 +324,19 @@ class MTeamCollector:
                 url, path = pool[ft]
                 print(fmt(i, url), file=STDERR)
                 try:
-                    self._parse_torrent(ft.result().content, path)
+                    ft = ft.result().content
+                    try:
+                        self._parse_torrent(ft, path)
+                    except OSError:
+                        raise
+                    except Exception as e:
+                        self._transmission_show(e, ft, path)
                 except requests.RequestException as e:
                     print(e, file=STDERR)
                 except Exception as e:
-                    print(getattr(e, "stderr", "").strip() or e, file=STDERR)
+                    if isinstance(e, subprocess.CalledProcessError):
+                        e = e.stderr.strip() or e
+                    print(e, file=STDERR)
                     try:
                         os.unlink(path)
                     except OSError:
@@ -381,16 +389,12 @@ class MTeamCollector:
             print("ok", file=STDERR)
         return tree
 
-    def _parse_torrent(self, content: bytes, path: str):
+    @staticmethod
+    def _parse_torrent(content: bytes, path: str):
         """Parse a torrent, write file list to `path`."""
-        try:
-            files = Torrent.from_string(content).files
-            with open(path, "w", encoding="utf-8") as f:
-                f.writelines(i[0].lower() + "\n" for i in files)
-        except OSError:
-            raise
-        except Exception as e:
-            self._transmission_show(e, content, path)
+        files = Torrent.from_string(content).files
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(i[0].lower() + "\n" for i in files)
 
     def _transmission_show(self, e: Exception, content: bytes, path: str):
 
