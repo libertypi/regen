@@ -230,7 +230,7 @@ class DMMScraper(Scraper):
         xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
                            '//tr/td[1]/p[@class="ttl"]/a/@href')
 
-        pool = [submit(get_tree, u) for u in url]
+        pool = {submit(get_tree, u) for u in url}
         for ft in as_completed(pool):
             tree = ft.result()
             i = tree.xpath(
@@ -239,7 +239,7 @@ class DMMScraper(Scraper):
             i = re.fullmatch(r"(.*/page=)(\d+)(/.*)", urljoin(tree.base_url, i))
             url = f"{i[1]}{{}}{i[3]}".format
             i = range(2, int(i[2]) + 1)
-            pool.extend(submit(get_tree, url(j)) for j in i)
+            pool.update(submit(get_tree, url(j)) for j in i)
 
         total = len(pool)
         step = frozenset(range(1, total, (total // 10) or 1))
@@ -278,7 +278,7 @@ class MTeamCollector:
 
         self._account = {"username": username, "password": password}
         self._page_max = page_max
-        self._cache_dirs = (
+        self._cachedirs = (
             op.join(cache_dir, "non_av"),
             op.join(cache_dir, "av"),
         )
@@ -286,67 +286,43 @@ class MTeamCollector:
             urljoin(self.DOMAIN, non_av_page),
             urljoin(self.DOMAIN, av_page),
         )
-        for cache_dir in self._cache_dirs:
+        for cache_dir in self._cachedirs:
             os.makedirs(cache_dir, exist_ok=True)
 
     def from_cache(self, is_av: bool) -> Iterator[str]:
         matcher = re.compile(r"[0-9]+\.txt").fullmatch
-        with os.scandir(self._cache_dirs[is_av]) as it:
+        with os.scandir(self._cachedirs[is_av]) as it:
             for entry in it:
                 if matcher(entry.name):
                     yield entry.path
 
     def from_web(self, is_av: bool) -> Iterator[str]:
 
-        url = self._urls[is_av]
-        cache_dir = self._cache_dirs[is_av]
+        cachedir = self._cachedirs[is_av]
         pool = {}
-        idx = 0
-        total = self._page_max
         join = op.join
         exists = op.exists
-        step = frozenset(range(1, total, (total // 10) or 1))
         matcher = re.compile(r"\bid=([0-9]+)").search
-        xpath = xp_compile(
-            '//form[@id="form_torrent"]//table[@class="torrentname"]'
-            '/descendant::a[contains(@href, "download.php?")][1]/@href')
-
-        print(f"Scanning mteam ({total} pages)...",
-              end="",
-              flush=True,
-              file=STDERR)
-        self._login()
 
         with ThreadPoolExecutor() as ex:
 
-            for ft in as_completed(
-                    ex.submit(get_tree, url, params={"page": i})
-                    for i in range(1, total + 1)):
+            for url in self._scanpage(self._urls[is_av], ex):
+                try:
+                    path = join(cachedir, matcher(url)[1] + ".txt")
+                except TypeError:
+                    continue
+                if exists(path):
+                    yield path
+                else:
+                    url = urljoin(self.DOMAIN, url)
+                    pool[ex.submit(get_response, url)] = url, path
 
-                idx += 1
-                if idx in step:
-                    print(f"{idx}..", end="", flush=True, file=STDERR)
+            i = len(pool)
+            fmt = f"[{{:{len(str(i))}d}}/{i}] {{}}".format
 
-                for url in xpath(ft.result()):
-                    try:
-                        path = join(cache_dir, matcher(url)[1] + ".txt")
-                    except TypeError:
-                        continue
-                    if exists(path):
-                        yield path
-                    else:
-                        url = urljoin(self.DOMAIN, url)
-                        pool[ex.submit(get_response, url)] = url, path
-            print(total, file=STDERR)
-
-            idx = 0
-            total = len(pool)
-            fmt = f"[{{:{len(str(total))}d}}/{total}] {{}}".format
-
-            for ft in as_completed(pool):
+            for i, ft in enumerate(as_completed(pool), 1):
                 url, path = pool[ft]
-                idx += 1
-                print(fmt(idx, url), file=STDERR)
+                print(fmt(i, url), file=STDERR)
                 try:
                     self._parse_torrent(ft.result().content, path)
                 except requests.RequestException as e:
@@ -360,24 +336,52 @@ class MTeamCollector:
                 else:
                     yield path
 
-    def _login(self):
+    def _scanpage(self, url: str, ex: ThreadPoolExecutor) -> Iterator[str]:
+
+        xpath = xp_compile(
+            '//form[@id="form_torrent"]//table[@class="torrentname"]'
+            '/descendant::a[contains(@href, "download.php?")][1]/@href')
+
+        # mteam page indexes start at 0, display numbers should start at 1
+        tree = self._login(url, params={"page": 0})
+        total = tree.xpath(
+            'string(//td[@id="outer"]/table//td/p[@align="center"]'
+            '/a[contains(@href, "page=")][last()]/@href)')
+        total = int(re.search(r"\bpage=(\d+)", total)[1]) + 1
+        if 0 < self._page_max < total:
+            total = self._page_max
+        step = frozenset(range(1, total, (total // 10) or 1))
+
+        print(f"Scanning mteam ({total}): 1..", end="", flush=True, file=STDERR)
+        pool = as_completed({
+            ex.submit(get_tree, url, params={"page": i})
+            for i in range(1, total)
+        })
+        yield from xpath(tree)
+
+        for i, tree in enumerate(pool, 2):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            yield from xpath(tree.result())
+        print(total, file=STDERR)
+
+    def _login(self, url, **kwargs):
         try:
-            r = session.head(self._urls[0], allow_redirects=True)
-            r.raise_for_status()
-            if "/login.php" in r.url:
-                print("login...", end="", flush=True)
+            tree = get_tree(url, **kwargs)
+            if "/login.php" in tree.base_url:
+                print("Login mteam...", end="", flush=True, file=STDERR)
                 session.post(
                     url=self.DOMAIN + "/takelogin.php",
                     data=self._account,
                     headers={"referer": self.DOMAIN + "/login.php"},
                 )
-                r = session.head(self._urls[0], allow_redirects=True)
-                r.raise_for_status()
-                if "/login.php" in r.url:
-                    raise requests.RequestException("invalid credentials")
-            self._login = self._skip
+                tree = get_tree(url, **kwargs)
+                if "/login.php" in tree.base_url:
+                    sys.exit("invalid credentials")
+                print("ok", file=STDERR)
         except requests.RequestException as e:
             sys.exit(f"login failed: {e}")
+        return tree
 
     def _parse_torrent(self, content: bytes, path: str):
         """Parse a torrent, write file list to `path`."""
@@ -408,7 +412,7 @@ class MTeamCollector:
                 "to install transmission-show to handle more torrents.\n"
                 "In Ubuntu, try: 'sudo apt install transmission-cli'",
                 file=STDERR)
-            self._parse_torrent2 = self._skip
+            self._parse_torrent2 = self._raise
             raise e
         finally:
             try:
@@ -424,9 +428,8 @@ class MTeamCollector:
             f.writelines(i.lower() + "\n" for i in files)
 
     @staticmethod
-    def _skip(e=None, *args):
-        if e is not None:
-            raise e
+    def _raise(e, *args):
+        raise e
 
 
 class Builder:
@@ -618,7 +621,7 @@ class Analyzer:
             i = regex.index("(", 1)
             regex = "{}({}".format(regex[:i].replace("(", "(?:"),
                                    regex[i + 1:].replace("(", "(?:"))
-            self.mt = re.compile(regex, flags=re.M).search
+            self.re = re.compile(regex, flags=re.M).search
         except (OSError, ValueError) as e:
             sys.exit(e)
 
@@ -738,12 +741,12 @@ class Analyzer:
     def _match_av(self, path: str) -> Optional[str]:
         with open(path, "r", encoding="utf-8") as f:
             a, b = tee(filter(self.ext, f))
-            if not any(map(self.mt, a)):
+            if not any(map(self.re, a)):
                 return "".join(b)
 
     def _match_nonav(self, path: str) -> Tuple[str]:
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(m[1] for m in map(self.mt, filter(self.ext, f)) if m)
+            return tuple(m[1] for m in map(self.re, filter(self.ext, f)) if m)
 
     def _format_report(self, total, count, title, result):
         f = self._slice_on_len
@@ -856,7 +859,7 @@ def parse_config(configfile: str) -> dict:
             "username": "",
             "password": "",
             "page_max": 500,
-            "cache_dir": "cache",
+            "cache_dir": "mteam",
             "av_page": "/adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
             "non_av_page": "/torrents.php",
         },
@@ -932,7 +935,8 @@ def parse_arguments():
         dest="mteam_max",
         action="store",
         type=int,
-        help="maximum mteam pages to scan, override 'mteam.page_max'",
+        help=("maximum mteam pages to scan, override 'mteam.page_max' "
+              "(0 for unlimited)"),
     )
     return parser.parse_args()
 
