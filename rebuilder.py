@@ -306,7 +306,7 @@ class MTeamCollector:
 
         with ThreadPoolExecutor() as ex:
 
-            for url in self._scanpage(self._urls[is_av], ex):
+            for url in self._get_links(self._urls[is_av], ex):
                 try:
                     path = join(cachedir, matcher(url)[1] + ".txt")
                 except TypeError:
@@ -336,7 +336,8 @@ class MTeamCollector:
                 else:
                     yield path
 
-    def _scanpage(self, url: str, ex: ThreadPoolExecutor) -> Iterator[str]:
+    def _get_links(self, url: str, ex: ThreadPoolExecutor) -> Iterator[str]:
+        """Scan pages up to _page_max, yields download links."""
 
         # mteam page indexes start at 0, display numbers should start at 1
         tree = self._login(url, params={"page": 0})
@@ -365,21 +366,19 @@ class MTeamCollector:
         print(total, file=STDERR)
 
     def _login(self, url, **kwargs):
-        try:
+
+        tree = get_tree(url, **kwargs)
+        if "/login.php" in tree.base_url:
+            print("Login mteam...", end="", flush=True, file=STDERR)
+            session.post(
+                url=self.DOMAIN + "/takelogin.php",
+                data=self._account,
+                headers={"referer": self.DOMAIN + "/login.php"},
+            )
             tree = get_tree(url, **kwargs)
             if "/login.php" in tree.base_url:
-                print("Login mteam...", end="", flush=True, file=STDERR)
-                session.post(
-                    url=self.DOMAIN + "/takelogin.php",
-                    data=self._account,
-                    headers={"referer": self.DOMAIN + "/login.php"},
-                )
-                tree = get_tree(url, **kwargs)
-                if "/login.php" in tree.base_url:
-                    sys.exit("invalid credentials")
-                print("ok", file=STDERR)
-        except requests.RequestException as e:
-            sys.exit(f"login failed: {e}")
+                sys.exit("invalid credentials")
+            print("ok", file=STDERR)
         return tree
 
     def _parse_torrent(self, content: bytes, path: str):
@@ -391,9 +390,9 @@ class MTeamCollector:
         except OSError:
             raise
         except Exception as e:
-            self._parse_torrent2(e, content, path)
+            self._transmission_show(e, content, path)
 
-    def _parse_torrent2(self, e: Exception, content: bytes, path: str):
+    def _transmission_show(self, e: Exception, content: bytes, path: str):
 
         torrent_file = path + ".torrent"
         try:
@@ -411,7 +410,7 @@ class MTeamCollector:
                 "to install transmission-show to handle more torrents.\n"
                 "In Ubuntu, try: 'sudo apt install transmission-cli'",
                 file=STDERR)
-            self._parse_torrent2 = self._raise
+            self._transmission_show = self._raise
             raise e
         finally:
             try:
