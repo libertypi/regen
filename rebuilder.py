@@ -115,8 +115,9 @@ class JavBusScraper(Scraper):
                         i += 1
                         yield from xpath(t)
             except LastPageReached as e:
-                print(file=STDERR)
-                if stop_null_page and e.args[0] == 1:
+                if e.args[0] > 1:
+                    print(file=STDERR)
+                elif stop_null_page:
                     break
 
     def _scrape_id(self):
