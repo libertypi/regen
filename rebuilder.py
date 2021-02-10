@@ -58,12 +58,12 @@ class Scraper:
             except (OSError, ValueError):
                 raise e
             else:
-                print(f"Scraping failed, using cache. Error: {e}", file=STDERR)
+                print(f"Scrapper error, use cache: {e}", file=STDERR)
         else:
             with open(datafile, "w", encoding="utf-8") as f:
                 json.dump(data, f, separators=(",", ":"))
 
-        print(f"  entries: {len(data)}", file=STDERR)
+        print(f"  Entries: {len(data)}", file=STDERR)
         r = re.compile(self.ID_RE).fullmatch
         return filter(None, map(r, map(str.lower, data)))
 
@@ -103,18 +103,19 @@ class JavBusScraper(Scraper):
             xpath = xp_compile(xpath)
 
         for page in pages:
-            lo = 1
-            print(f"  {page}: ", end="", flush=True, file=STDERR)
+            i = 1
             url = repeat(domain + page)
             try:
                 while True:
-                    hi = lo + self.STEP
-                    print(f"{lo}..", end="", flush=True, file=STDERR)
-                    trees = self.ex.map(self.get_tree, url, range(lo, hi))
-                    yield from chain.from_iterable(map(xpath, trees))
-                    lo = hi
+                    for t in self.ex.map(self.get_tree, url,
+                                         range(i, i + self.STEP)):
+                        print(f'  {page} |{"=" * (i // 50)}> {i}',
+                              end="\r",
+                              file=STDERR)
+                        i += 1
+                        yield from xpath(t)
             except LastPageReached as e:
-                print(e, file=STDERR)
+                print(file=STDERR)
                 if stop_null_page and e.args[0] == 1:
                     break
 
@@ -207,14 +208,10 @@ class AVEScraper(Scraper):
 
         pool = []
         total = len(url)
-        step = get_steps(total)
-        print(f"  stage 1 ({total}): ", end="", file=STDERR)
-
         m = {"Rows": 3}
         url = as_completed(submit(get_tree, u, params=m) for u in url)
-        for i, tree in enumerate(url, 1):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
+
+        for tree in progress(url, total, prefix="Stage 1"):
             tree = tree.result()
             m = page_matcher(page_xp(tree))
             if m:
@@ -222,18 +219,11 @@ class AVEScraper(Scraper):
                 m = range(2, int(m[2]) + 1)
                 pool.extend(submit(get_tree, url(i)) for i in m)
             yield from id_xp(tree)
-        print(total, file=STDERR)
 
         total = len(pool)
-        step = get_steps(total)
-        print(f"  stage 2 ({total}): ", end="", file=STDERR)
-
         pool = as_completed(pool)
-        for i, tree in enumerate(pool, 1):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
+        for tree in progress(pool, total, prefix="Stage 2"):
             yield from id_xp(tree.result())
-        print(total, file=STDERR)
 
 
 class DMMScraper(Scraper):
@@ -257,24 +247,19 @@ class DMMScraper(Scraper):
         pool = {submit(get_tree, u) for u in url}
         for ft in as_completed(pool):
             tree = ft.result()
-            i = tree.xpath(
+            total = tree.xpath(
                 'string(.//div[@class="list-capt"]//li[@class="terminal"]'
                 '/a/@href[contains(., "/page=")])')
-            i = re.fullmatch(r"(.*/page=)(\d+)(/.*)", urljoin(tree.base_url, i))
-            url = f"{i[1]}{{}}{i[3]}".format
-            i = range(2, int(i[2]) + 1)
-            pool.update(submit(get_tree, url(j)) for j in i)
+            total = re.fullmatch(r"(.*/page=)(\d+)(/.*)",
+                                 urljoin(tree.base_url, total))
+            url = f"{total[1]}{{}}{total[3]}".format
+            total = range(2, int(total[2]) + 1)
+            pool.update(submit(get_tree, url(i)) for i in total)
 
         total = len(pool)
-        step = get_steps(total)
-        print(f"  total ({total}): ", end="", flush=True, file=STDERR)
-
         pool = as_completed(pool)
-        for i, ft in enumerate(pool, 1):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
+        for ft in progress(pool, total):
             yield from xpath(ft.result())
-        print(total, file=STDERR)
 
 
 class MGSScraper(Scraper):
@@ -307,50 +292,32 @@ class MGSScraper(Scraper):
         results.discard(url)
 
         total = len(results) + 1
-        step = get_steps(total)
         results = chain(self.ex.map(get_tree, results), (tree,))
         pool = {}
-        print(f"  stage 1 ({total}): ", end="", file=STDERR)
-
-        for i, tree in enumerate(results, 1):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
+        for tree in progress(results, total, prefix="Stage 1"):
             url = tree.base_url
             for m in xp_maker(tree):
                 m = urljoin(url, m)
                 if m not in pool:
                     pool[m] = submit(get_tree, m)
-        print(total, file=STDERR)
 
         total = len(pool)
-        step = get_steps(total)
         results = as_completed(pool.values())
         pool = []
-        print(f"  stage 2 ({total}): ", end="", file=STDERR)
-
-        for i, tree in enumerate(results, 1):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
+        for tree in progress(results, total, prefix="Stage 2"):
             tree = tree.result()
             m = page_matcher(xp_last(tree))
             if m:
                 url = f"{urljoin(tree.base_url, m[1])}{{}}{m[3]}".format
-                i = int(m[2]) + 1
-                pool.extend(submit(get_tree, url(j)) for j in range(2, i))
+                m = int(m[2]) + 1
+                pool.extend(submit(get_tree, url(i)) for i in range(2, m))
             yield from xp_id(tree)
-        print(total, file=STDERR)
 
         total = len(pool)
-        step = get_steps(total)
         results = as_completed(pool)
         del pool
-        print(f"  stage 3 ({total}): ", end="", file=STDERR)
-
-        for i, tree in enumerate(results, 1):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
+        for tree in progress(results, total, prefix="Stage 3"):
             yield from xp_id(tree.result())
-        print(total, file=STDERR)
 
 
 class MTeamCollector:
@@ -382,6 +349,7 @@ class MTeamCollector:
 
     def from_web(self, is_av: bool) -> Iterator[str]:
 
+        print(f"Scanning mteam...", file=STDERR)
         cachedir = self._cachedirs[is_av]
         pool = {}
         join = op.join
@@ -402,8 +370,7 @@ class MTeamCollector:
                     pool[ex.submit(get_response, url)] = url, path
 
             i = len(pool)
-            fmt = f"[{{:{len(str(i))}d}}/{i}] {{}}".format
-
+            fmt = f"  [{{:{len(str(i))}d}}/{i}] {{}}".format
             for i, ft in enumerate(as_completed(pool), 1):
                 url, path = pool[ft]
                 print(fmt(i, url), file=STDERR)
@@ -439,29 +406,24 @@ class MTeamCollector:
         total = int(re.search(r"\bpage=(\d+)", total)[1]) + 1
         if 0 < self._page_max < total:
             total = self._page_max
+
         pool = as_completed({
             ex.submit(get_tree, url, params={"page": i})
             for i in range(1, total)
         })
-
-        print(f"Scanning mteam ({total}): 1..", end="", flush=True, file=STDERR)
-        step = get_steps(total)
         xpath = xp_compile(
             '//form[@id="form_torrent"]//table[@class="torrentname"]'
             '/descendant::a[contains(@href, "download.php?")][1]/@href')
         yield from xpath(tree)
 
-        for i, tree in enumerate(pool, 2):
-            if i in step:
-                print(f"{i}..", end="", flush=True, file=STDERR)
+        for tree in progress(pool, total, 2):
             yield from xpath(tree.result())
-        print(total, file=STDERR)
 
     def _login(self, url, **kwargs):
 
         tree = get_tree(url, **kwargs)
         if "/login.php" in tree.base_url:
-            print("Login mteam...", end="", flush=True, file=STDERR)
+            print("Login...", end="", flush=True, file=STDERR)
             session.post(
                 url=self.DOMAIN + "/takelogin.php",
                 data=self._account,
@@ -923,8 +885,19 @@ def get_freqwords(lo=3, k: int = 3000):
     return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
 
 
-def get_steps(total: int, start: int = 1):
-    return frozenset(range(start, total, (total // 10) or 1))
+def progress(iterable, total, start=1, prefix="Progress", width=50):
+    """Yield iterable while print progress bar."""
+
+    if not total:
+        return
+    f = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{}}{{}}| {{:.1%}} Complete".format
+    for i, obj in enumerate(iterable, start):
+        n = i * width // total
+        print(f(i, "█" * n, "-" * (width - n), i / total),
+              end="\r",
+              file=STDERR)
+        yield obj
+    print(file=STDERR)
 
 
 def dump_cookies(path: str):
@@ -937,26 +910,25 @@ def xp_compile(path: str):
 
 
 def parse_config(configfile: str) -> dict:
+
     try:
         with open(configfile, "r", encoding="utf-8") as f:
             config = json.load(f)
-        a = op.normpath
-        b = op.expanduser
-        config["profile"] = a(b(config["profile"]))
-        config["regex_file"] = a(b(config["regex_file"]))
-        config["mteam"]["cache_dir"] = a(b(config["mteam"]["cache_dir"]))
+        norm_config_path(config, "regex_file", "regex.txt")
+        norm_config_path(config, "profile_dir", "builder")
+        norm_config_path(config["mteam"], "cache_dir", "mteam")
     except FileNotFoundError:
         pass
     except Exception as e:
-        sys.exit(f"Error in config file: {e}")
+        sys.exit(f"Config file error: {e}")
     else:
         return config
 
     default = {
-        "profile": "builder",
         "regex_file": "regex.txt",
         "keyword_max": 150,
         "prefix_max": 3000,
+        "profile_dir": "builder",
         "mteam": {
             "username": "",
             "password": "",
@@ -970,6 +942,14 @@ def parse_config(configfile: str) -> dict:
     with open(configfile, "w", encoding="utf-8") as f:
         json.dump(default, f, indent=4)
     sys.exit(f"Please edit {configfile} before running me again.")
+
+
+def norm_config_path(d: dict, k: str, default: str):
+    """If a key is missing, or the value is null, set to default value.
+    Otherwise normalize the path.
+    """
+    v = d.get(k)
+    d[k] = op.normpath(op.expanduser(v)) if v else default
 
 
 def parse_arguments():
@@ -1049,7 +1029,7 @@ def main():
 
     path = op.dirname(__file__)
     config = parse_config(op.join(path, "config.json"))
-    path = op.join(path, config["profile"])
+    path = op.join(path, config["profile_dir"])
     try:
         os.chdir(path)
     except FileNotFoundError:
