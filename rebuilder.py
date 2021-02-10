@@ -14,19 +14,19 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
 from itertools import chain, count, filterfalse, islice, repeat, tee
 from operator import itemgetter
 from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin
 
 import requests
 from lxml.etree import XPath
 from lxml.html import HtmlElement
 from lxml.html import fromstring as html_fromstring
 
+from regen import Regen
+
 try:
     from bencoder import bdecode
 except ImportError:
     bdecode = None
-
-from regen import Regen
 
 STDERR = sys.stderr
 JAV_RE = r"([a-z]{3,10})[_-]?([0-9]{2,8})[abcrz]?"
@@ -684,6 +684,10 @@ class Analyzer:
 
     def __init__(self, *, regex_file: str, mteam: dict, **kwargs) -> None:
 
+        self.regex_file = regex_file
+        self._reportdir = "report"
+        self._mteam = MTeamCollector(**mteam)
+
         try:
             with open(regex_file, "r", encoding="utf-8") as f:
                 regex = f.readline().strip()
@@ -694,18 +698,13 @@ class Analyzer:
             i = regex.index("(", 1)
             regex = "{}({}".format(regex[:i].replace("(", "(?:"),
                                    regex[i + 1:].replace("(", "(?:"))
-            self.re = re.compile(regex, flags=re.M).search
         except (OSError, ValueError) as e:
             sys.exit(e)
-
+        self.re = re.compile(regex, flags=re.M).search
         self.ext = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|"
             r"avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
             flags=re.M).search
-
-        self._mteam = MTeamCollector(**mteam)
-        self.regex_file = regex_file
-        self._reportdir = "report"
         os.makedirs(self._reportdir, exist_ok=True)
 
     def analyze_av(self, local: bool = False):
