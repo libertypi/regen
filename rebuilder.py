@@ -20,7 +20,11 @@ import requests
 from lxml.etree import XPath
 from lxml.html import HtmlElement
 from lxml.html import fromstring as html_fromstring
-from torrentool.api import Torrent
+
+try:
+    from bencoder import bdecode
+except ImportError:
+    bdecode = None
 
 from regen import Regen
 
@@ -44,6 +48,10 @@ class Scraper:
         self.ex = ex
 
     def get_id(self) -> Iterator[re.Match]:
+
+        print("Scanning {} for product ids...".format(
+            self.__class__.__name__.rpartition("Scraper")[0]),
+              file=STDERR)
 
         datafile = op.join("data", self.DATAFILE)
         try:
@@ -98,7 +106,6 @@ class JavBusScraper(Scraper):
                 pages: Iterable[str],
                 stop_null_page=False):
 
-        print(f"Scanning {urlsplit(domain).netloc} ...", file=STDERR)
         if isinstance(xpath, str):
             xpath = xp_compile(xpath)
 
@@ -129,6 +136,10 @@ class JavBusScraper(Scraper):
         )
 
     def get_keyword(self):
+
+        print("Scanning {} for keywords...".format(
+            self.__class__.__name__.rpartition("Scraper")[0]),
+              file=STDERR)
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
@@ -161,6 +172,10 @@ class JavDBScraper(JavBusScraper):
         )
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
+
+        print("Scanning {} for keywords...".format(
+            self.__class__.__name__.rpartition("Scraper")[0]),
+              file=STDERR)
         r = self._scrape(
             '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
             domain="https://javdb.com",
@@ -188,8 +203,6 @@ class AVEScraper(Scraper):
     def _scrape_id(self):
 
         url = "https://www.aventertainments.com/studiolists.aspx"
-        print(f"Scanning {urlsplit(url).netloc} ...", file=STDERR)
-
         page_xp = xp_compile('string(//div[@class="pagination-rev"]'
                              '/ul/li[a/@title="Next"]'
                              '/preceding-sibling::li[1]/a/@href)')
@@ -235,12 +248,11 @@ class DMMScraper(Scraper):
     DATAFILE = "dmm.json"
 
     def _scrape_id(self):
+
         url = (
             "https://www.dmm.co.jp/digital/videoa/-/list/=/sort=release_date/view=text/",
             "https://www.dmm.co.jp/digital/videoc/-/list/=/sort=release_date/view=text/",
         )
-        print(f"Scanning {urlsplit(url[0]).netloc} ...", file=STDERR)
-
         submit = self.ex.submit
         xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
                            '//tr/td[1]/p[@class="ttl"]/a/@href')
@@ -273,8 +285,6 @@ class MGSScraper(Scraper):
     def _scrape_id(self):
 
         url = "https://www.mgstage.com/ppv/makers.php?id=osusume"
-        print(f"Scanning {urlsplit(url).netloc} ...", file=STDERR)
-
         xp_maker = xp_compile(
             '//div[@id="maker_list"]/div[@class="maker_list_box"]'
             '/dl/dt/a[2]/@href[contains(., "search.php")]')
@@ -319,171 +329,6 @@ class MGSScraper(Scraper):
         del pool
         for tree in progress(results, total, prefix="Stage 3"):
             yield from xp_id(tree.result())
-
-
-class MTeamCollector:
-
-    DOMAIN = "https://pt.m-team.cc"
-
-    def __init__(self, *, username: str, password: str, page_max: int,
-                 cache_dir: str, av_page: str, non_av_page: str) -> None:
-
-        self._account = {"username": username, "password": password}
-        self._page_max = page_max
-        self._cachedirs = (
-            op.join(cache_dir, "non_av"),
-            op.join(cache_dir, "av"),
-        )
-        self._urls = (
-            urljoin(self.DOMAIN, non_av_page),
-            urljoin(self.DOMAIN, av_page),
-        )
-        for cache_dir in self._cachedirs:
-            os.makedirs(cache_dir, exist_ok=True)
-
-    def from_cache(self, is_av: bool) -> Iterator[str]:
-        matcher = re.compile(r"[0-9]+\.txt").fullmatch
-        with os.scandir(self._cachedirs[is_av]) as it:
-            for entry in it:
-                if matcher(entry.name):
-                    yield entry.path
-
-    def from_web(self, is_av: bool) -> Iterator[str]:
-
-        print(f"Scanning mteam...", file=STDERR)
-        cachedir = self._cachedirs[is_av]
-        pool = {}
-        join = op.join
-        exists = op.exists
-        matcher = re.compile(r"\bid=([0-9]+)").search
-
-        with ThreadPoolExecutor() as ex:
-
-            for url in self._get_links(self._urls[is_av], ex):
-                try:
-                    path = join(cachedir, matcher(url)[1] + ".txt")
-                except TypeError:
-                    continue
-                if exists(path):
-                    yield path
-                else:
-                    url = urljoin(self.DOMAIN, url)
-                    pool[ex.submit(get_response, url)] = url, path
-
-            i = len(pool)
-            fmt = f"  [{{:{len(str(i))}d}}/{i}] {{}}".format
-            for i, ft in enumerate(as_completed(pool), 1):
-                url, path = pool[ft]
-                print(fmt(i, url), file=STDERR)
-                try:
-                    ft = ft.result().content
-                    try:
-                        self._parse_torrent(ft, path)
-                    except OSError:
-                        raise
-                    except Exception as e:
-                        self._transmission_show(e, ft, path)
-                except requests.RequestException as e:
-                    print(e, file=STDERR)
-                except Exception as e:
-                    if isinstance(e, subprocess.CalledProcessError):
-                        e = e.stderr.strip() or e
-                    print(e, file=STDERR)
-                    try:
-                        os.unlink(path)
-                    except OSError:
-                        pass
-                else:
-                    yield path
-
-    def _get_links(self, url: str, ex: ThreadPoolExecutor) -> Iterator[str]:
-        """Scan pages up to _page_max, yields download links."""
-
-        # mteam page indexes start at 0, display numbers should start at 1
-        tree = self._login(url, params={"page": 0})
-        total = tree.xpath(
-            'string(//td[@id="outer"]/table//td/p[@align="center"]'
-            '/a[contains(@href, "page=")][last()]/@href)')
-        total = int(re.search(r"\bpage=(\d+)", total)[1]) + 1
-        if 0 < self._page_max < total:
-            total = self._page_max
-
-        pool = as_completed({
-            ex.submit(get_tree, url, params={"page": i})
-            for i in range(1, total)
-        })
-        xpath = xp_compile(
-            '//form[@id="form_torrent"]//table[@class="torrentname"]'
-            '/descendant::a[contains(@href, "download.php?")][1]/@href')
-        yield from xpath(tree)
-
-        for tree in progress(pool, total, 2):
-            yield from xpath(tree.result())
-
-    def _login(self, url, **kwargs):
-
-        tree = get_tree(url, **kwargs)
-        if "/login.php" in tree.base_url:
-            print("Login...", end="", flush=True, file=STDERR)
-            session.post(
-                url=self.DOMAIN + "/takelogin.php",
-                data=self._account,
-                headers={"referer": self.DOMAIN + "/login.php"},
-            )
-            tree = get_tree(url, **kwargs)
-            if "/login.php" in tree.base_url:
-                sys.exit("invalid credentials")
-            print("ok", file=STDERR)
-        return tree
-
-    @staticmethod
-    def _parse_torrent(content: bytes, path: str):
-        """Parse a torrent, write file list to `path`."""
-        files = Torrent.from_string(content).files
-        with open(path, "w", encoding="utf-8") as f:
-            f.writelines(i[0].lower() + "\n" for i in files)
-
-    def _transmission_show(self, e: Exception, content: bytes, path: str):
-
-        torrent_file = path.rpartition(".")[0] + ".torrent"
-        try:
-            with open(torrent_file, "wb") as f:
-                f.write(content)
-            files = subprocess.run(
-                ("transmission-show", torrent_file),
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-        except FileNotFoundError:
-            print(
-                "Error: transmission-show not found. It is recommended "
-                "to install transmission-show to handle more torrents.\n"
-                "In Ubuntu, try: 'sudo apt install transmission-cli'",
-                file=STDERR)
-            self._transmission_show = self._raise
-            raise e
-        finally:
-            try:
-                os.unlink(torrent_file)
-            except OSError:
-                pass
-        try:
-            spliter = self._spliter
-        except AttributeError:
-            spliter = self._spliter = re.compile(
-                r"^\s+(.+) \([^)]+\)$",
-                flags=re.MULTILINE,
-            ).findall
-        files = spliter(files, files.index("\n\nFILES\n\n"))
-        if not files:
-            raise ValueError("torrent file seems empty")
-        with open(path, "w", encoding="utf-8") as f:
-            f.writelines(i.lower() + "\n" for i in files)
-
-    @staticmethod
-    def _raise(e, *args):
-        raise e
 
 
 class Builder:
@@ -664,6 +509,177 @@ class Builder:
         return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
 
 
+class MTeamCollector:
+
+    DOMAIN = "https://pt.m-team.cc"
+
+    def __init__(self, *, username: str, password: str, page_max: int,
+                 cache_dir: str, av_page: str, non_av_page: str) -> None:
+
+        if bdecode is None:
+            sys.exit("Error: require module 'bencoder.pyx'")
+
+        self._account = {"username": username, "password": password}
+        self._page_max = page_max
+        self._cachedirs = (
+            op.join(cache_dir, "non_av"),
+            op.join(cache_dir, "av"),
+        )
+        self._urls = (
+            urljoin(self.DOMAIN, non_av_page),
+            urljoin(self.DOMAIN, av_page),
+        )
+        for cache_dir in self._cachedirs:
+            os.makedirs(cache_dir, exist_ok=True)
+
+    def from_cache(self, is_av: bool) -> Iterator[str]:
+        matcher = re.compile(r"[0-9]+\.txt").fullmatch
+        with os.scandir(self._cachedirs[is_av]) as it:
+            for entry in it:
+                if matcher(entry.name):
+                    yield entry.path
+
+    def from_web(self, is_av: bool) -> Iterator[str]:
+
+        print(f"Scanning mteam...", file=STDERR)
+        cachedir = self._cachedirs[is_av]
+        pool = {}
+        join = op.join
+        exists = op.exists
+        matcher = re.compile(r"\bid=([0-9]+)").search
+
+        with ThreadPoolExecutor() as ex:
+
+            for url in self._get_links(self._urls[is_av], ex):
+                try:
+                    path = join(cachedir, matcher(url)[1] + ".txt")
+                except TypeError:
+                    continue
+                if exists(path):
+                    yield path
+                else:
+                    url = urljoin(self.DOMAIN, url)
+                    pool[ex.submit(get_response, url)] = url, path
+
+            i = len(pool)
+            fmt = f"  [{{:{len(str(i))}d}}/{i}] {{}}".format
+            for i, ft in enumerate(as_completed(pool), 1):
+                url, path = pool.pop(ft)
+                print(fmt(i, url), file=STDERR)
+                try:
+                    ft = ft.result().content
+                    try:
+                        self._parse_torrent(ft, path)
+                    except OSError:
+                        raise
+                    except Exception as e:
+                        self._transmission_show(e, ft, path)
+                except requests.RequestException as e:
+                    print(e, file=STDERR)
+                except Exception as e:
+                    if isinstance(e, subprocess.CalledProcessError):
+                        e = e.stderr.strip() or e
+                    print(e, file=STDERR)
+                    try:
+                        os.unlink(path)
+                    except OSError:
+                        pass
+                else:
+                    yield path
+
+    def _get_links(self, url: str, ex: ThreadPoolExecutor) -> Iterator[str]:
+        """Scan pages up to _page_max, yields download links."""
+
+        # mteam page indexes start at 0, display numbers should start at 1
+        tree = self._login(url, params={"page": 0})
+        total = tree.xpath(
+            'string(//td[@id="outer"]/table//td/p[@align="center"]'
+            '/a[contains(@href, "page=")][last()]/@href)')
+        total = int(re.search(r"\bpage=(\d+)", total)[1]) + 1
+        if 0 < self._page_max < total:
+            total = self._page_max
+
+        pool = as_completed({
+            ex.submit(get_tree, url, params={"page": i})
+            for i in range(1, total)
+        })
+        xpath = xp_compile(
+            '//form[@id="form_torrent"]//table[@class="torrentname"]'
+            '/descendant::a[contains(@href, "download.php?")][1]/@href')
+        yield from xpath(tree)
+
+        for tree in progress(pool, total, 2):
+            yield from xpath(tree.result())
+
+    def _login(self, url, **kwargs):
+        tree = get_tree(url, **kwargs)
+        if "/login.php" in tree.base_url:
+            print("Login...", end="", flush=True, file=STDERR)
+            session.post(
+                url=self.DOMAIN + "/takelogin.php",
+                data=self._account,
+                headers={"referer": self.DOMAIN + "/login.php"},
+            )
+            tree = get_tree(url, **kwargs)
+            if "/login.php" in tree.base_url:
+                sys.exit("invalid credentials")
+            print("ok", file=STDERR)
+        return tree
+
+    @staticmethod
+    def _parse_torrent(content: bytes, path: str):
+        """decode a torrent, write file list to `path`."""
+        info = bdecode(content)[b"info"]
+        name = info[b"name.utf-8"] if b"name.utf-8" in info else info[b"name"]
+        with open(path, "w", encoding="utf-8") as f:
+            if b"files" in info:
+                files = info[b"files"]
+                k = b"path.utf-8" if b"path.utf-8" in files[0] else b"path"
+                join = op.join
+                f.writelines(
+                    join(name, *p[k]).decode(errors="ignore") + "\n"
+                    for p in files)
+            else:
+                f.write(name.decode(errors="ignore") + "\n")
+
+    def _transmission_show(self, e: Exception, content: bytes, path: str):
+
+        torrent_file = path.rpartition(".")[0] + ".torrent"
+        try:
+            with open(torrent_file, "wb") as f:
+                f.write(content)
+            files = subprocess.run(
+                ("transmission-show", torrent_file),
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout
+        except FileNotFoundError:
+            print(
+                "Error: transmission-show not found. It is recommended "
+                "to install transmission-show to handle more torrents.\n"
+                "In Ubuntu, try: 'sudo apt install transmission-cli'",
+                file=STDERR)
+            self._transmission_show = self._raise
+            raise e
+        finally:
+            try:
+                os.unlink(torrent_file)
+            except OSError:
+                pass
+
+        spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
+        files = spliter.findall(files, files.index("\n\nFILES\n\n"))
+        if not files:
+            raise ValueError("torrent file seems empty")
+        with open(path, "w", encoding="utf-8") as f:
+            f.writelines(i + "\n" for i in files)
+
+    @staticmethod
+    def _raise(e, *args):
+        raise e
+
+
 class Analyzer:
 
     def __init__(self, *, regex_file: str, mteam: dict, **kwargs) -> None:
@@ -800,14 +816,18 @@ class Analyzer:
         print(f"Result saved to: {op.abspath(report_file)}", file=STDERR)
 
     def _match_av(self, path: str) -> Optional[str]:
+        """If none video is matched, return all videos in the file (in lower
+        case). """
         with open(path, "r", encoding="utf-8") as f:
-            a, b = tee(filter(self.ext, f))
+            a, b = tee(filter(self.ext, map(str.lower, f)))
             if not any(map(self.re, a)):
                 return "".join(b)
 
     def _match_nonav(self, path: str) -> Tuple[str]:
+        """Return all matched videos in the file (in lower case). """
         with open(path, "r", encoding="utf-8") as f:
-            return tuple(m[1] for m in map(self.re, filter(self.ext, f)) if m)
+            a = map(self.re, filter(self.ext, map(str.lower, f)))
+            return tuple(m[1] for m in a if m)
 
     def _format_report(self, total, count, title, result):
         f = self._slice_on_len
