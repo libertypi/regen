@@ -25,7 +25,7 @@ from torrentool.api import Torrent
 from regen import Regen
 
 STDERR = sys.stderr
-JAVID_RE = r"([a-z]{3,10})[_-]?([0-9]{2,8})[abcrz]?"
+JAV_RE = r"([a-z]{3,10})[_-]?([0-9]{2,8})[abcrz]?"
 session = None
 
 
@@ -36,7 +36,7 @@ class LastPageReached(Exception):
 class Scraper:
 
     __slots__ = "ex"
-    ID_RE = JAVID_RE
+    ID_RE = JAV_RE
     DATA_RE: str
     DATAFILE: str
 
@@ -44,13 +44,25 @@ class Scraper:
         self.ex = ex
 
     def get_id(self) -> Iterator[re.Match]:
-        data = map(re.compile(self.DATA_RE).search, self._scrape_id())
-        data = sorted(frozenset(map(itemgetter(1), filter(None, data))))
-        with open(op.join("data", self.DATAFILE), "w", encoding="utf-8") as f:
-            json.dump(data, f, separators=(",", ":"))
-        return self._filter_id(data)
 
-    def _filter_id(self, data: List[str]):
+        datafile = op.join("data", self.DATAFILE)
+        try:
+            data = map(re.compile(self.DATA_RE).search, self._scrape_id())
+            data = sorted(frozenset(map(itemgetter(1), filter(None, data))))
+            if not data:
+                raise ValueError("empty result")
+        except Exception as e:
+            try:
+                with open(datafile, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, ValueError):
+                raise e
+            else:
+                print(f"Scraping failed, using cache. Error: {e}", file=STDERR)
+        else:
+            with open(datafile, "w", encoding="utf-8") as f:
+                json.dump(data, f, separators=(",", ":"))
+
         print(f"  entries: {len(data)}", file=STDERR)
         r = re.compile(self.ID_RE).fullmatch
         return filter(None, map(r, map(str.lower, data)))
@@ -195,7 +207,7 @@ class AVEScraper(Scraper):
 
         pool = []
         total = len(url)
-        step = frozenset(range(1, total, (total // 10) or 1))
+        step = get_steps(total)
         print(f"  stage 1 ({total}): ", end="", file=STDERR)
 
         m = {"Rows": 3}
@@ -213,7 +225,7 @@ class AVEScraper(Scraper):
         print(total, file=STDERR)
 
         total = len(pool)
-        step = frozenset(range(1, total, (total // 10) or 1))
+        step = get_steps(total)
         print(f"  stage 2 ({total}): ", end="", file=STDERR)
 
         pool = as_completed(pool)
@@ -228,7 +240,7 @@ class DMMScraper(Scraper):
 
     __slots__ = ()
     DATA_RE = r"/cid=([A-Za-z0-9_-]+)/"
-    ID_RE = rf"(?:[a-z]+_)?\d*{JAVID_RE}"
+    ID_RE = rf"(?:[a-z]+_)?\d*{JAV_RE}"
     DATAFILE = "dmm.json"
 
     def _scrape_id(self):
@@ -254,7 +266,7 @@ class DMMScraper(Scraper):
             pool.update(submit(get_tree, url(j)) for j in i)
 
         total = len(pool)
-        step = frozenset(range(1, total, (total // 10) or 1))
+        step = get_steps(total)
         print(f"  total ({total}): ", end="", flush=True, file=STDERR)
 
         pool = as_completed(pool)
@@ -265,22 +277,80 @@ class DMMScraper(Scraper):
         print(total, file=STDERR)
 
 
-class MGSJsonLoader(Scraper):
+class MGSScraper(Scraper):
 
-    __slots__ = "datafile"
-    ID_RE = rf"\d*{JAVID_RE}"
+    __slots__ = ()
+    DATA_RE = r"product_detail/([A-Za-z0-9_-]+)/?$"
+    ID_RE = rf"\d*{JAV_RE}"
+    DATAFILE = "mgs.json"
 
-    def __init__(self, datafile: str) -> None:
-        self.datafile = datafile
+    def _scrape_id(self):
 
-    def get_id(self):
-        datafile = self.datafile
-        if not datafile:
-            return ()
-        print(f"Loading {op.basename(datafile)} ...", file=STDERR)
-        with open(datafile, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return self._filter_id(data)
+        url = "https://www.mgstage.com/ppv/makers.php?id=osusume"
+        print(f"Scanning {urlsplit(url).netloc} ...", file=STDERR)
+
+        xp_maker = xp_compile(
+            '//div[@id="maker_list"]/div[@class="maker_list_box"]'
+            '/dl/dt/a[2]/@href[contains(., "search.php")]')
+        xp_last = xp_compile('string(//div[@class="pager_search_bottom"]'
+                             '//a[contains(., "最後")]/@href)')
+        xp_id = xp_compile('//article[@id="center_column"]'
+                           '//div[@class="rank_list"]//li/h5/a/@href')
+        page_matcher = re.compile(r"(.*page=)(\d+)(.*)").fullmatch
+        submit = self.ex.submit
+
+        tree = get_tree(url)
+        url = tree.base_url
+        results = tree.xpath('//div[@id="maker_list"]/dl[@class="navi"]'
+                             '/dd/a/@href[contains(., "makers.php")]')
+        results = {urljoin(url, u) for u in results}
+        results.discard(url)
+
+        total = len(results) + 1
+        step = get_steps(total)
+        results = chain(self.ex.map(get_tree, results), (tree,))
+        pool = {}
+        print(f"  stage 1 ({total}): ", end="", file=STDERR)
+
+        for i, tree in enumerate(results, 1):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            url = tree.base_url
+            for m in xp_maker(tree):
+                m = urljoin(url, m)
+                if m not in pool:
+                    pool[m] = submit(get_tree, m)
+        print(total, file=STDERR)
+
+        total = len(pool)
+        step = get_steps(total)
+        results = as_completed(pool.values())
+        pool = []
+        print(f"  stage 2 ({total}): ", end="", file=STDERR)
+
+        for i, tree in enumerate(results, 1):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            tree = tree.result()
+            m = page_matcher(xp_last(tree))
+            if m:
+                url = f"{urljoin(tree.base_url, m[1])}{{}}{m[3]}".format
+                i = int(m[2]) + 1
+                pool.extend(submit(get_tree, url(j)) for j in range(2, i))
+            yield from xp_id(tree)
+        print(total, file=STDERR)
+
+        total = len(pool)
+        step = get_steps(total)
+        results = as_completed(pool)
+        del pool
+        print(f"  stage 3 ({total}): ", end="", file=STDERR)
+
+        for i, tree in enumerate(results, 1):
+            if i in step:
+                print(f"{i}..", end="", flush=True, file=STDERR)
+            yield from xp_id(tree.result())
+        print(total, file=STDERR)
 
 
 class MTeamCollector:
@@ -375,7 +445,7 @@ class MTeamCollector:
         })
 
         print(f"Scanning mteam ({total}): 1..", end="", flush=True, file=STDERR)
-        step = frozenset(range(1, total, (total // 10) or 1))
+        step = get_steps(total)
         xpath = xp_compile(
             '//form[@id="form_torrent"]//table[@class="torrentname"]'
             '/descendant::a[contains(@href, "download.php?")][1]/@href')
@@ -456,12 +526,11 @@ class MTeamCollector:
 class Builder:
 
     def __init__(self, *, regex_file: str, keyword_max: int, prefix_max: int,
-                 mgs_json: str, **kwargs) -> None:
+                 **kwargs) -> None:
 
         self._regex_file = regex_file
         self._keyword_max = keyword_max
         self._prefix_max = prefix_max
-        self._mgs_json = mgs_json
         self._datafile = op.join("data", "frequency.json")
 
     def from_cache(self) -> Optional[str]:
@@ -481,7 +550,7 @@ class Builder:
                 JavDBScraper(ex),
                 AVEScraper(ex),
                 DMMScraper(ex),
-                MGSJsonLoader(self._mgs_json),
+                MGSScraper(ex),
             )
             data = {
                 "prefix": self._scrape_prefix(scrapers),
@@ -821,19 +890,18 @@ def init_session(path: str):
             session.cookies = pickle.load(f)
     except FileNotFoundError:
         os.makedirs("data", exist_ok=True)
-        create_cookie = requests.cookies.create_cookie
-        session.cookies.set_cookie(
-            create_cookie(
-                domain="www.javbus.com",
-                name="existmag",
-                value="all",
-            ))
-        session.cookies.set_cookie(
-            create_cookie(
-                domain="dmm.co.jp",
-                name="age_check_done",
-                value="1",
-            ))
+
+    set_cookie = session.cookies.set_cookie
+    create_cookie = requests.cookies.create_cookie
+    set_cookie(
+        create_cookie(domain="www.javbus.com", name="existmag", value="all"))
+    set_cookie(
+        create_cookie(domain="dmm.co.jp", name="age_check_done", value="1"))
+    set_cookie(create_cookie(domain="mgstage.com", name="adc", value="1"))
+    set_cookie(
+        create_cookie(domain="www.aventertainments.com",
+                      name="DVDRowData",
+                      value="3"))
 
 
 def get_response(url: str, **kwargs) -> requests.Response:
@@ -855,6 +923,10 @@ def get_freqwords(lo=3, k: int = 3000):
     return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
 
 
+def get_steps(total: int, start: int = 1):
+    return frozenset(range(start, total, (total // 10) or 1))
+
+
 def dump_cookies(path: str):
     with open(path, "wb") as f:
         pickle.dump(session.cookies, f)
@@ -870,8 +942,8 @@ def parse_config(configfile: str) -> dict:
             config = json.load(f)
         a = op.normpath
         b = op.expanduser
+        config["profile"] = a(b(config["profile"]))
         config["regex_file"] = a(b(config["regex_file"]))
-        config["mgs_json"] = a(b(config["mgs_json"]))
         config["mteam"]["cache_dir"] = a(b(config["mteam"]["cache_dir"]))
     except FileNotFoundError:
         pass
@@ -881,10 +953,10 @@ def parse_config(configfile: str) -> dict:
         return config
 
     default = {
+        "profile": "builder",
         "regex_file": "regex.txt",
         "keyword_max": 150,
         "prefix_max": 3000,
-        "mgs_json": "",
         "mteam": {
             "username": "",
             "password": "",
@@ -975,16 +1047,16 @@ def main():
 
     args = parse_arguments()
 
-    config = op.join(op.dirname(__file__), "builder")
+    path = op.dirname(__file__)
+    config = parse_config(op.join(path, "config.json"))
+    path = op.join(path, config["profile"])
     try:
-        os.chdir(config)
+        os.chdir(path)
     except FileNotFoundError:
-        os.mkdir(config)
-        os.chdir(config)
-    config = parse_config("config.json")
-
-    cookiefile = op.join("data", "cookies")
-    init_session(cookiefile)
+        os.mkdir(path)
+        os.chdir(path)
+    path = op.join("data", "cookies")
+    init_session(path)
 
     if args.file:
         config["regex_file"] = args.file
@@ -1010,7 +1082,7 @@ def main():
         else:
             analyzer.analyze_nonav(args.local)
 
-    dump_cookies(cookiefile)
+    dump_cookies(path)
 
 
 if __name__ == "__main__":
