@@ -39,8 +39,7 @@ import re
 from collections import defaultdict
 from functools import lru_cache
 from itertools import chain, compress, filterfalse
-from typing import (Dict, FrozenSet, Iterable, Iterator, List, Optional, Set,
-                    Tuple, Union)
+from typing import Iterable, Iterator, List, Optional, Union
 
 from ortools.sat.python.cp_model import (FEASIBLE, OPTIMAL, CpModel, CpSolver,
                                          LinearExpr)
@@ -50,7 +49,6 @@ _not_special = _specials.isdisjoint
 _rangeChars = frozenset("0123456789,")
 _repetitions = frozenset("*?+{")
 _split_token = re.compile(r"[^\\]|\\.").findall
-Token = Tuple[str]
 
 
 class Parser:
@@ -64,7 +62,7 @@ class Parser:
         self.index = 0
         self.subParser = self.token = None
 
-    def parse(self, _input: Union[str, List[str]]) -> Iterator[Token]:
+    def parse(self, _input: Union[str, List[str]]):
         """Convert a regular expression to a tokenset."""
 
         if isinstance(_input, str):
@@ -265,7 +263,7 @@ class Parser:
 
 
 @lru_cache(maxsize=4096)
-def optimize(tokenSet: FrozenSet[Token], omitOuterParen: bool = False) -> str:
+def optimize(tokenSet: frozenset, omitOuterParen: bool = False) -> str:
     """Compute an optimized regular expression from the given tokenset."""
 
     tokenSet = set(tokenSet)
@@ -284,8 +282,7 @@ def optimize(tokenSet: FrozenSet[Token], omitOuterParen: bool = False) -> str:
         return ""
 
 
-def _wordStrategy(tokenSet: Set[Token], quantifier: str,
-                  omitOuterParen: bool) -> str:
+def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
     tokenSetLength = len(tokenSet)
     if tokenSetLength == 1:
@@ -381,7 +378,7 @@ def _wordStrategy(tokenSet: Set[Token], quantifier: str,
     return string
 
 
-def _charsetStrategy(tokenSet: Set[Token], quantifier: str = "") -> str:
+def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
 
     if len(tokenSet) > 1:
         char = sorted(chain.from_iterable(tokenSet))
@@ -397,11 +394,11 @@ def _charsetStrategy(tokenSet: Set[Token], quantifier: str = "") -> str:
 
 
 @lru_cache(maxsize=512)
-def _is_word(token: Token) -> bool:
+def _is_word(token) -> bool:
     return sum(map(len, token)) > 1
 
 
-def _filter_affix(d: dict, s: set = None) -> Dict[Token, Set[Token]]:
+def _filter_affix(d: dict, s: set = None):
     """Keep groups which divide the same words at max common subsequence,
     and remove single member groups.
 
@@ -428,8 +425,7 @@ def _filter_affix(d: dict, s: set = None) -> Dict[Token, Set[Token]]:
     return {k: d[k] for _, k in tmp.values()}
 
 
-def _optimize_group(unvisited: set,
-                    candidate: dict) -> Iterator[FrozenSet[Token]]:
+def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
     """Divide candidates into groups that each group is internally connected
     with common members. Then for each group, find the best non-overlapping
     members to reach the maximum length reduction.
@@ -528,8 +524,9 @@ class Regen:
         elif not isinstance(wordlist, Iterable):
             raise TypeError("Input should be a list of strings.")
 
+        parser = Parser()
         self._tokens = frozenset(
-            chain.from_iterable(map(Parser().parse, wordlist)))
+            chain.from_iterable(map(parser.parse, wordlist)))
         self._cache = {}
 
     def to_words(self) -> List[str]:
