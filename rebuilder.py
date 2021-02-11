@@ -860,8 +860,7 @@ def get_freqwords(lo=3, k: int = 3000):
 
 
 def progress(iterable, total, start=1, prefix="Progress", width=50):
-    """Yield iterable while print progress bar."""
-
+    """Yield items from iterable while printing a progress bar."""
     if not total:
         return
     f = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{}}{{}}| {{:.1%}} Complete".format
@@ -888,9 +887,9 @@ def parse_config(configfile: str) -> dict:
     try:
         with open(configfile, "r", encoding="utf-8") as f:
             config = json.load(f)
-        norm_config_path(config, "regex_file", "regex.txt")
-        norm_config_path(config, "profile_dir", "builder")
-        norm_config_path(config["mteam"], "cache_dir", "mteam")
+        norm_configpath(config, "regex_file", "regex.txt")
+        norm_configpath(config, "profile_dir", "builder")
+        norm_configpath(config["mteam"], "cache_dir", "mteam")
     except FileNotFoundError:
         pass
     except Exception as e:
@@ -918,7 +917,7 @@ def parse_config(configfile: str) -> dict:
     sys.exit(f"Please edit {configfile} before running me again.")
 
 
-def norm_config_path(d: dict, k: str, default: str):
+def norm_configpath(d: dict, k: str, default: str):
     """If a key is missing, or the value is null, set to default value.
     Otherwise normalize the path.
     """
@@ -946,7 +945,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="test_av",
-        help="test regex with av torrents",
+        help="test regex with mteam av torrents",
     )
     group.add_argument(
         "-m",
@@ -954,7 +953,7 @@ def parse_arguments():
         dest="mode",
         action="store_const",
         const="test_nonav",
-        help="test regex with non-av torrents",
+        help="test regex with mteam non-av torrents",
     )
     group.set_defaults(mode="build")
     parser.add_argument(
@@ -965,7 +964,8 @@ def parse_arguments():
         help="use cached data instead of web scraping (default %(default)s)",
     )
 
-    group = parser.add_argument_group(title="configfile override")
+    group = parser.add_argument_group(
+        title="config override (override corresponding setting in config file)")
     group.add_argument(
         "--file",
         dest="file",
