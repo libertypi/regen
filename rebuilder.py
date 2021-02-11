@@ -573,6 +573,7 @@ class MTeamCollector:
                     except OSError:
                         raise
                     except Exception as e:
+                        print(e)
                         self._transmission_show(e, ft, path)
                 except requests.RequestException as e:
                     print(e, file=STDERR)
@@ -631,16 +632,16 @@ class MTeamCollector:
         """decode a torrent, write file list to `path`."""
         info = bdecode(content)[b"info"]
         name = info[b"name.utf-8"] if b"name.utf-8" in info else info[b"name"]
+        name = name.decode(errors="ignore")
         with open(path, "w", encoding="utf-8") as f:
             if b"files" in info:
                 files = info[b"files"]
                 k = b"path.utf-8" if b"path.utf-8" in files[0] else b"path"
-                join = op.join
-                f.writelines(
-                    join(name, *p[k]).decode(errors="ignore") + "\n"
-                    for p in files)
+                join = b"/".join
+                f.writelines(f'{name}/{join(p[k]).decode(errors="ignore")}\n'
+                             for p in files)
             else:
-                f.write(name.decode(errors="ignore") + "\n")
+                f.write(name + "\n")
 
     def _transmission_show(self, e: Exception, content: bytes, path: str):
 
