@@ -573,7 +573,6 @@ class MTeamCollector:
                     except OSError:
                         raise
                     except Exception as e:
-                        print(e)
                         self._transmission_show(e, ft, path)
                 except requests.RequestException as e:
                     print(e, file=STDERR)
