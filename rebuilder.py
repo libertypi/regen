@@ -6,7 +6,6 @@ import os
 import os.path as op
 import pickle
 import re
-import subprocess
 import sys
 from collections import Counter, defaultdict
 from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
@@ -561,25 +560,17 @@ class MTeamCollector:
                     url = urljoin(self.DOMAIN, url)
                     pool[ex.submit(get_response, url)] = url, path
 
-            i = len(pool)
-            fmt = f"  [{{:{len(str(i))}d}}/{i}] {{}}".format
+            i = str(len(pool))
+            fmt = f"  [{{:{len(i)}d}}/{i}] {{}}".format
             for i, ft in enumerate(as_completed(pool), 1):
                 url, path = pool.pop(ft)
                 print(fmt(i, url), file=STDERR)
                 try:
-                    ft = ft.result().content
-                    try:
-                        self._parse_torrent(ft, path)
-                    except OSError:
-                        raise
-                    except Exception as e:
-                        self._transmission_show(e, ft, path)
+                    self._parse_torrent(ft.result().content, path)
                 except requests.RequestException as e:
                     print(e, file=STDERR)
                 except Exception as e:
-                    if isinstance(e, subprocess.CalledProcessError):
-                        e = e.stderr.strip() or e
-                    print(e, file=STDERR)
+                    print(f"Error parsing torrent: {e}", file=STDERR)
                     try:
                         os.unlink(path)
                     except OSError:
@@ -641,43 +632,6 @@ class MTeamCollector:
                              for p in files)
             else:
                 f.write(name + "\n")
-
-    def _transmission_show(self, e: Exception, content: bytes, path: str):
-
-        torrent_file = path.rpartition(".")[0] + ".torrent"
-        try:
-            with open(torrent_file, "wb") as f:
-                f.write(content)
-            files = subprocess.run(
-                ("transmission-show", torrent_file),
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout
-        except FileNotFoundError:
-            print(
-                "Error: transmission-show not found. It is recommended "
-                "to install transmission-show to handle more torrents.\n"
-                "In Ubuntu, try: 'sudo apt install transmission-cli'",
-                file=STDERR)
-            self._transmission_show = self._raise
-            raise e
-        finally:
-            try:
-                os.unlink(torrent_file)
-            except OSError:
-                pass
-
-        spliter = re.compile(r"^\s+(.+) \([^)]+\)$", flags=re.M)
-        files = spliter.findall(files, files.index("\n\nFILES\n\n"))
-        if not files:
-            raise ValueError("torrent file seems empty")
-        with open(path, "w", encoding="utf-8") as f:
-            f.writelines(i + "\n" for i in files)
-
-    @staticmethod
-    def _raise(e, *args):
-        raise e
 
 
 class Analyzer:
