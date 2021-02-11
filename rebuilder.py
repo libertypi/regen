@@ -770,7 +770,7 @@ class Analyzer:
 
     def _match_av(self, path: str) -> Optional[str]:
         """If none video is matched, return all videos in the file (in lower
-        case). """
+        case)."""
         with open(path, "r", encoding="utf-8") as f:
             a, b = tee(filter(self.ext, map(str.lower, f)))
             if not any(map(self.re, a)):
