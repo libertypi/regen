@@ -630,8 +630,8 @@ class MTeamCollector:
     def _parse_torrent(content: bytes, path: str):
         """decode a torrent, write file list to `path`."""
         info = bdecode(content)[b"info"]
-        name = info[b"name.utf-8"] if b"name.utf-8" in info else info[b"name"]
-        name = name.decode(errors="ignore")
+        name = (info[b"name.utf-8"] if b"name.utf-8" in info else
+                info[b"name"]).decode(errors="ignore")
         with open(path, "w", encoding="utf-8") as f:
             if b"files" in info:
                 files = info[b"files"]
