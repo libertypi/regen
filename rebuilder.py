@@ -487,7 +487,7 @@ class Builder:
 
         new = () if content is None else [content]
         try:
-            with open(file, "r+", encoding="utf-8") as f:
+            with open(file, "r+", encoding="utf-8", newline="\n") as f:
                 old = f.read().splitlines()
                 if not new:
                     new = self._sort_custom(old)
@@ -498,7 +498,7 @@ class Builder:
                     print(f"Update: {file}", file=STDERR)
         except FileNotFoundError:
             os.makedirs(op.dirname(file), exist_ok=True)
-            with open(file, mode="w", encoding="utf-8") as f:
+            with open(file, mode="w", encoding="utf-8", newline="\n") as f:
                 f.writelines(i + "\n" for i in new)
             print(f"Create: {file}", file=STDERR)
         return new
