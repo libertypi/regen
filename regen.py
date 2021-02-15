@@ -514,12 +514,10 @@ class Regen:
 
         :param wordlist: An iterable of strings contains words and/or regexps.
         """
-
         if isinstance(wordlist, str):
             wordlist = (wordlist,)
         elif not isinstance(wordlist, Iterable):
             raise TypeError("Input should be a list of strings.")
-
         parser = Parser()
         self._tokens = frozenset(
             chain.from_iterable(map(parser.parse, wordlist)))
@@ -536,7 +534,6 @@ class Regen:
         """
         if not isinstance(omitOuterParen, bool):
             raise TypeError("omitOuterParen should be bool.")
-
         regex = self._cache.get(omitOuterParen)
         if regex is None:
             regex = self._cache[omitOuterParen] = optimize(
@@ -547,12 +544,10 @@ class Regen:
         regex = next(iter(self._cache.values()), None)
         if regex is None:
             regex = self.to_regex()
-
         if self._tokens != Regen(regex)._tokens:
             raise ValueError(
                 "Extraction from computed regex is different from that of original wordlist."
             )
-
         for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
             if _not_special(i):
                 raise ValueError(
