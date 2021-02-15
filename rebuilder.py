@@ -504,7 +504,7 @@ class Builder:
         return new
 
     @staticmethod
-    def _sort_custom(a: List[str]):
+    def _sort_custom(a: List[str]) -> List[str]:
         return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
 
 

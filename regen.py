@@ -485,38 +485,34 @@ def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
 
 
 class Regen:
+    """A Regen object converts a word list to a regular expression, or vise versa.
 
-    __slots__ = ("_tokens", "_cache")
+    Basic Usage::
 
-    def __init__(self, wordlist: Iterable[str]) -> None:
-        """Convert a list of words to an optimized regular expression, or vise versa.
-
-        ### Args:
-        - `wordlist`: an iterable of strings.
-
-        ### Methods:
-        - `to_words`: Extract the regular expressions to a list of corresponding words.
-        - `to_regex`: Return an optimized regular expression matching all the words.
-
-        ### Examples:
         >>> from regen import Regen
-
         >>> wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
         >>> regen = Regen(wordlist)
         >>> regen.to_regex()
         '[AB]B[CD]'
 
+    Wordlist may contain both regexp and strings::
+
         >>> wordlist = ['[AB]B[CD]', 'XYZ']
         >>> regen = Regen(wordlist)
-
         >>> regen.to_words()
         ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
-
         >>> regen.to_regex()
         '(XYZ|[AB]B[CD])'
-
         >>> regen.to_regex(omitOuterParen=True)
         'XYZ|[AB]B[CD]'
+    """
+
+    __slots__ = ("_tokens", "_cache")
+
+    def __init__(self, wordlist: Iterable[str]) -> None:
+        """Convert a list of words to a regular expression, or vise versa.
+
+        :param wordlist: An iterable of strings contains words and/or regexps.
         """
 
         if isinstance(wordlist, str):
@@ -530,13 +526,13 @@ class Regen:
         self._cache = {}
 
     def to_words(self) -> List[str]:
-        """Extract the regular expressions to a list of corresponding words."""
+        """Extract the regular expressions to a list of plain words."""
         return sorted(map("".join, self._tokens))
 
     def to_regex(self, omitOuterParen: bool = False) -> str:
-        """Return an optimized regular expression matching all the words.
+        """Return an optimized regular expression.
 
-        :omitOuterParen: If True, the outmost parentheses (if any) will be omited.
+        :param omitOuterParen: omited the outmost parentheses (if any).
         """
         if not isinstance(omitOuterParen, bool):
             raise TypeError("omitOuterParen should be bool.")
