@@ -779,8 +779,10 @@ class Analyzer:
     def _match_nonav(self, path: str) -> Tuple[str]:
         """Return all matched videos in the file (in lower case). """
         with open(path, "r", encoding="utf-8") as f:
-            a = map(self.re, filter(self.ext, map(str.lower, f)))
-            return tuple(m[1] for m in a if m)
+            return tuple(
+                m[1]
+                for m in map(self.re, filter(self.ext, map(str.lower, f)))
+                if m)
 
     def _format_report(self, total, count, title, result):
         f = self._slice_on_len
