@@ -103,7 +103,7 @@ class JavBusScraper(Scraper):
                 xpath: Union[XPath, str],
                 domain: str,
                 pages: Iterable[str],
-                stop_null_page=False):
+                stop_null_page: bool = False):
 
         if isinstance(xpath, str):
             xpath = xp_compile(xpath)
