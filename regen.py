@@ -44,7 +44,7 @@ from typing import Iterable, Iterator, List, Optional, Union
 from ortools.sat.python.cp_model import (FEASIBLE, OPTIMAL, CpModel, CpSolver,
                                          LinearExpr)
 
-_specials = frozenset("{}()[]|?*+")
+_specials = frozenset(r"{}()[]|?*+")
 _not_special = _specials.isdisjoint
 _rangeChars = frozenset("0123456789,")
 _repetitions = frozenset("*?+{")

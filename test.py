@@ -45,11 +45,9 @@ class Testregen(unittest.TestCase):
     def test_optimizer(self):
         values = (
             (("ACD", "ACE", "BCD", "BCE"), "[AB]C[DE]"),
-            (
-                ("atkgirlfriend", "tonightsgirlfriend", "cruelgirlfriend",
-                 "atkgirlfriends", "tonightsgirlfriends", "cruelgirlfriends"),
-                "(atk|cruel|tonights)girlfriends?",
-            ),
+            (("atkgirlfriend", "tonightsgirlfriend", "cruelgirlfriend",
+              "atkgirlfriends", "tonightsgirlfriends", "cruelgirlfriends"),
+             "(atk|cruel|tonights)girlfriends?"),
             (("A|B*",), "(A|B*)"),
             (("AB|AC",), "A[BC]"),
             (("[BA]?[DC]?[FE]?",), "[AB]?[CD]?[EF]?"),
