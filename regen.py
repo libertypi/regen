@@ -318,7 +318,7 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
     while prefix or suffix:
 
-        for i, source in enumerate((prefix, suffix)):
+        for i, source in (0, prefix), (1, suffix):
 
             for k, v in source.items():
                 mirror[frozenset(segment[j][i][k] for j in v)].append(k)
@@ -347,13 +347,11 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
         if not unvisitCand:
             break
-
         for key in _optimize_group(unvisitCand, candidate):
             result.append(candidate[key][1])
             tokenSet.difference_update(key)
         if not tokenSet:
             break
-
         prefix = _filter_affix(prefix, tokenSet)
         suffix = _filter_affix(suffix, tokenSet)
 
