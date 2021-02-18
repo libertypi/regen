@@ -501,8 +501,6 @@ class Regen:
         >>> regen = Regen(wordlist)
         >>> regen.to_words()
         ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
-        >>> regen.to_regex()
-        '(XYZ|[AB]B[CD])'
         >>> regen.to_regex(omitOuterParen=True)
         'XYZ|[AB]B[CD]'
     """
