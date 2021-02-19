@@ -529,7 +529,7 @@ class Regen:
         :param omitOuterParen: omited the outmost parentheses (if any).
         """
         if not isinstance(omitOuterParen, bool):
-            raise TypeError("omitOuterParen should be bool.")
+            raise TypeError(f"expect bool, not {type(omitOuterParen):!r}")
         regex = self._cache.get(omitOuterParen)
         if regex is None:
             regex = self._cache[omitOuterParen] = optimize(
