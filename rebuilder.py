@@ -224,7 +224,7 @@ class AVEScraper(Scraper):
         m = {"Rows": 3}
         url = as_completed(submit(get_tree, u, params=m) for u in url)
 
-        for tree in progress(url, total, prefix="Stage 1"):
+        for tree in progress(url, total, prefix="Step 1"):
             tree = tree.result()
             m = page_matcher(page_xp(tree))
             if m:
@@ -235,7 +235,7 @@ class AVEScraper(Scraper):
 
         total = len(pool)
         pool = as_completed(pool)
-        for tree in progress(pool, total, prefix="Stage 2"):
+        for tree in progress(pool, total, prefix="Step 2"):
             yield from id_xp(tree.result())
 
 
@@ -304,7 +304,7 @@ class MGSScraper(Scraper):
         total = len(results) + 1
         results = chain(self.ex.map(get_tree, results), (tree,))
         pool = {}
-        for tree in progress(results, total, prefix="Stage 1"):
+        for tree in progress(results, total, prefix="Step 1"):
             url = tree.base_url
             for m in xp_maker(tree):
                 m = urljoin(url, m)
@@ -314,7 +314,7 @@ class MGSScraper(Scraper):
         total = len(pool)
         results = as_completed(pool.values())
         pool = []
-        for tree in progress(results, total, prefix="Stage 2"):
+        for tree in progress(results, total, prefix="Step 2"):
             tree = tree.result()
             m = page_matcher(xp_last(tree))
             if m:
@@ -326,7 +326,7 @@ class MGSScraper(Scraper):
         total = len(pool)
         results = as_completed(pool)
         del pool
-        for tree in progress(results, total, prefix="Stage 3"):
+        for tree in progress(results, total, prefix="Step 3"):
             yield from xp_id(tree.result())
 
 
