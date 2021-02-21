@@ -722,10 +722,13 @@ class Analyzer:
                 print(line, end="")
                 f.write(line)
 
+            m = max(len("item"),
+                    len(f"{word_count[0][0]}") if word_count else 0)
             f.write("\n\nPotential Keywords:\n"
-                    f'{"torrent":>7}  word\n'
+                    f'{"item":{m}}  word\n'
                     f'{"-" * 80}\n')
-            f.writelines(f"{i:7d}  {j}\n" for i, j in word_count)
+            f.writelines(map(f"{{0[0]:{m}d}}  {{0[1]}}\n".format, word_count))
+
         print(f"Result saved to: {op.abspath(report_file)}", file=STDERR)
 
     def analyze_nonav(self, local: bool = False):
@@ -784,22 +787,30 @@ class Analyzer:
                 for m in map(self.re, filter(self.ext, map(str.lower, f)))
                 if m)
 
-    def _format_report(self, total, count, title, result):
-        f = self._slice_on_len
+    def _format_report(self, total, count, title, result, width=80):
+
+        w1 = max(len("item"), len(f"{result[0][0]}") if result else 0)
+        w2 = max(len("word"), max((len(t[1]) for t in result), default=0))
+        w3 = max((len(f"{len(t[2])}") for t in result), default=0)
+        fmt = f"{{:{w1}d}}  {{:{w2}}}  {{:{w3}d}}: {{}}\n".format
+        w4 = width - len(fmt(0, 0, 0, ""))
+        slc = self._abbr_slice
+
         yield (
             f"Regex file: {self.regex_file}\n"
-            f"Total: {total}, Matched: {count}, Percentage: {count / total:.2%}\n\n"
+            f"Total: {total:,}, Matched: {count:,}, Percentage: {count / total:.2%}\n\n"
             f"{title}:\n"
-            f'{"torrent":>7}  {"word":15} strings\n{"-" * 80}\n')
+            f'item  {"word":{w2}}  strings\n'
+            f'{"-" * width}\n')
         for i, k, s in result:
-            yield f'{i:7d}  {k:15} {", ".join(f(s))}\n'
+            yield fmt(i, k, len(s), ", ".join(slc(s, w4)))
 
     @staticmethod
-    def _slice_on_len(a: Iterable[str], n: int = 80):
+    def _abbr_slice(a: Iterable[str], width: int):
         i = 0
         for x in a:
             i += len(x) + 2
-            if i >= n:
+            if i > width:
                 yield "..."
                 break
             yield x
