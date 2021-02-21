@@ -714,11 +714,14 @@ class Analyzer:
         f = lambda t: (-t[0], t[1])
         prefix_count.sort(key=f)
         word_count.sort(key=f)
-        report = self._format_report(total, total - count,
-                                     "Potential ID Prefixes", prefix_count)
 
         with open(report_file, "w", encoding="utf-8") as f:
-            for line in report:
+            for line in self._format_report(
+                    total,
+                    total - count,
+                    "Potential ID Prefixes",
+                    prefix_count,
+            ):
                 print(line, end="")
                 f.write(line)
 
@@ -762,11 +765,14 @@ class Analyzer:
 
         word_count = [(i, k, strings[k]) for k, i in word_count.items()]
         word_count.sort(key=lambda t: (-t[0], t[1]))
-        report = self._format_report(total, count, "Matched Strings",
-                                     word_count)
 
         with open(report_file, "w", encoding="utf-8") as f:
-            for line in report:
+            for line in self._format_report(
+                    total,
+                    count,
+                    "Matched Strings",
+                    word_count,
+            ):
                 print(line, end="")
                 f.write(line)
         print(f"Result saved to: {op.abspath(report_file)}", file=STDERR)
