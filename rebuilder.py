@@ -48,7 +48,7 @@ class Scraper:
 
     def get_id(self) -> Iterator[re.Match]:
 
-        print(f"Scanning {self._scraper_name} for product ids...", file=STDERR)
+        print(f"Scanning {self.scraper_name} for product ids...", file=STDERR)
 
         datafile = op.join("data", self.DATAFILE)
         try:
@@ -76,7 +76,7 @@ class Scraper:
         raise NotImplementedError
 
     @property
-    def _scraper_name(self):
+    def scraper_name(self):
         return self.__class__.__name__.rpartition("Scraper")[0]
 
 
@@ -140,7 +140,7 @@ class JavBusScraper(Scraper):
 
     def get_keyword(self):
 
-        print(f"Scanning {self._scraper_name} for keywords...", file=STDERR)
+        print(f"Scanning {self.scraper_name} for keywords...", file=STDERR)
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
@@ -174,7 +174,7 @@ class JavDBScraper(JavBusScraper):
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
 
-        print(f"Scanning {self._scraper_name} for keywords...", file=STDERR)
+        print(f"Scanning {self.scraper_name} for keywords...", file=STDERR)
         r = self._scrape(
             '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
             domain="https://javdb.com",
@@ -881,7 +881,7 @@ def progress(iterable, total, start=1, prefix="Progress", width=50):
     if not total:
         return
     write = STDERR.write
-    fmt = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}}\r".format
+    fmt = f"  {prefix}: [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}}\r".format
     for i, obj in enumerate(iterable, start):
         write(fmt(i, "█" * (i * width // total), i / total))
         yield obj
