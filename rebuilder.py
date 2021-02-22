@@ -107,6 +107,7 @@ class JavBusScraper(Scraper):
 
         if isinstance(xpath, str):
             xpath = xp_compile(xpath)
+        write = STDERR.write
 
         for page in pages:
             i = 1
@@ -118,12 +119,12 @@ class JavBusScraper(Scraper):
                             url,
                             range(i, i + self.STEP),
                     ):
-                        STDERR.write(f'  {page} 8{"=" * (i // 50)}Э {i}\r')
+                        write(f'  {page} 8={"=" * (i // 50)}Э {i}\r')
                         i += 1
                         yield from xpath(t)
             except LastPageReached as e:
                 if e.args[0] > 1:
-                    print(file=STDERR)
+                    write("\n")
                 elif stop_null_page:
                     break
 
@@ -882,9 +883,9 @@ def progress(iterable, total, start=1, prefix="Progress", width=50):
     if not total:
         return
     write = STDERR.write
-    f = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}} Complete\r".format
+    fmt = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}} Complete\r".format
     for i, obj in enumerate(iterable, start):
-        write(f(i, "█" * (i * width // total), i / total))
+        write(fmt(i, "█" * (i * width // total), i / total))
         yield obj
     write("\n")
 
