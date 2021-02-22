@@ -113,11 +113,12 @@ class JavBusScraper(Scraper):
             url = repeat(domain + page)
             try:
                 while True:
-                    for t in self.ex.map(self.get_tree, url,
-                                         range(i, i + self.STEP)):
-                        print(f'  {page} |{"=" * (i // 50)}> {i}',
-                              end="\r",
-                              file=STDERR)
+                    for t in self.ex.map(
+                            self.get_tree,
+                            url,
+                            range(i, i + self.STEP),
+                    ):
+                        STDERR.write(f'  {page} 8{"=" * (i // 50)}Э {i}\r')
                         i += 1
                         yield from xpath(t)
             except LastPageReached as e:
@@ -379,11 +380,10 @@ class Builder:
         setdefault = d.setdefault
         freq = ex.submit(get_freqwords)
         for s in scrapers:
-            if not hasattr(s, "get_keyword"):
-                continue
-            for k, v in s.get_keyword():
-                if setdefault(k, v) < v:
-                    d[k] = v
+            if hasattr(s, "get_keyword"):
+                for k, v in s.get_keyword():
+                    if setdefault(k, v) < v:
+                        d[k] = v
         for k in freq.result().intersection(d):
             del d[k]
         return self._sort_scrape(d.items())
@@ -665,12 +665,12 @@ class Analyzer:
 
         print("Matching test begins with av torrents...", file=STDERR)
 
-        report_file = op.join(self._reportdir, "av_report.txt")
-        raw_file = op.join(self._reportdir, "mismatch_raw.txt")
+        reportfile = op.join(self._reportdir, "av_report.txt")
+        rawfile = op.join(self._reportdir, "mismatch_raw.txt")
         total = count = 0
         strings = defaultdict(set)
-        prefix_count = Counter()
-        word_count = Counter()
+        prefixcount = Counter()
+        wordcount = Counter()
         tmp = set()
         prefix_finder = re.compile(
             r"(?:^|/)([0-9]{,5}([a-z]{2,10})"
@@ -684,7 +684,7 @@ class Analyzer:
         paths = paths(is_av=True)
 
         with ProcessPoolExecutor() as ex, \
-             open(raw_file, "w", encoding="utf-8") as f:
+            open(rawfile, "w", encoding="utf-8") as f:
 
             freqwords = ex.submit(get_freqwords)
             for content in ex.map(self._match_av, paths, chunksize=100):
@@ -696,43 +696,42 @@ class Analyzer:
                     for string, prefix in prefix_finder(content):
                         strings[prefix].add(string)
                         tmp.add(prefix)
-                    prefix_count.update(tmp)
+                    prefixcount.update(tmp)
                     tmp.clear()
 
                     tmp.update(word_finder(content))
-                    word_count.update(tmp)
+                    wordcount.update(tmp)
                     tmp.clear()
             freqwords = freqwords.result()
 
-        prefix_count = [
-            (i, k, strings[k]) for k, i in prefix_count.items() if i >= 5
+        prefixcount = [
+            (i, k, strings[k]) for k, i in prefixcount.items() if i >= 5
         ]
-        word_count = [(i, k)
-                      for k, i in word_count.items()
-                      if i >= 5 and k not in freqwords]
+        wordcount = [(i, k)
+                     for k, i in wordcount.items()
+                     if i >= 5 and k not in freqwords]
 
         f = lambda t: (-t[0], t[1])
-        prefix_count.sort(key=f)
-        word_count.sort(key=f)
+        prefixcount.sort(key=f)
+        wordcount.sort(key=f)
 
-        with open(report_file, "w", encoding="utf-8") as f:
+        with open(reportfile, "w", encoding="utf-8") as f:
             for line in self._format_report(
                     total,
                     total - count,
                     "Potential ID Prefixes",
-                    prefix_count,
+                    prefixcount,
             ):
                 print(line, end="")
                 f.write(line)
 
-            m = max(len("item"),
-                    len(f"{word_count[0][0]}") if word_count else 0)
+            m = max(len("item"), len(f"{wordcount[0][0]}") if wordcount else 0)
             f.write("\n\nPotential Keywords:\n"
                     f'{"item":{m}}  word\n'
                     f'{"-" * 80}\n')
-            f.writelines(map(f"{{0[0]:{m}d}}  {{0[1]}}\n".format, word_count))
+            f.writelines(map(f"{{0[0]:{m}d}}  {{0[1]}}\n".format, wordcount))
 
-        print(f"Result saved to: {op.abspath(report_file)}", file=STDERR)
+        print(f"Result saved to: {op.abspath(reportfile)}", file=STDERR)
 
     def analyze_nonav(self, local: bool = False):
 
@@ -743,7 +742,7 @@ class Analyzer:
         searcher = re.compile(r"[a-z]+").search
 
         strings = defaultdict(set)
-        word_count = Counter()
+        wordcount = Counter()
         tmp = set()
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=False)
@@ -760,18 +759,18 @@ class Analyzer:
                             word = string
                         strings[word].add(string)
                         tmp.add(word)
-                    word_count.update(tmp)
+                    wordcount.update(tmp)
                     tmp.clear()
 
-        word_count = [(i, k, strings[k]) for k, i in word_count.items()]
-        word_count.sort(key=lambda t: (-t[0], t[1]))
+        wordcount = [(i, k, strings[k]) for k, i in wordcount.items()]
+        wordcount.sort(key=lambda t: (-t[0], t[1]))
 
         with open(report_file, "w", encoding="utf-8") as f:
             for line in self._format_report(
                     total,
                     count,
                     "Matched Strings",
-                    word_count,
+                    wordcount,
             ):
                 print(line, end="")
                 f.write(line)
@@ -882,14 +881,12 @@ def progress(iterable, total, start=1, prefix="Progress", width=50):
     """Yield items from iterable while printing a progress bar."""
     if not total:
         return
-    f = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{}}{{}}| {{:.1%}} Complete".format
+    write = STDERR.write
+    f = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}} Complete\r".format
     for i, obj in enumerate(iterable, start):
-        n = i * width // total
-        print(f(i, "█" * n, "-" * (width - n), i / total),
-              end="\r",
-              file=STDERR)
+        write(f(i, "█" * (i * width // total), i / total))
         yield obj
-    print(file=STDERR)
+    write("\n")
 
 
 def dump_cookies(path: str):
