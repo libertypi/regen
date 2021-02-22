@@ -48,9 +48,7 @@ class Scraper:
 
     def get_id(self) -> Iterator[re.Match]:
 
-        print("Scanning {} for product ids...".format(
-            self.__class__.__name__.rpartition("Scraper")[0]),
-              file=STDERR)
+        print(f"Scanning {self._scraper_name} for product ids...", file=STDERR)
 
         datafile = op.join("data", self.DATAFILE)
         try:
@@ -76,6 +74,10 @@ class Scraper:
 
     def _scrape_id(self) -> Iterator[str]:
         raise NotImplementedError
+
+    @property
+    def _scraper_name(self):
+        return self.__class__.__name__.rpartition("Scraper")[0]
 
 
 class JavBusScraper(Scraper):
@@ -119,7 +121,7 @@ class JavBusScraper(Scraper):
                             url,
                             range(i, i + self.STEP),
                     ):
-                        write(f'  {page} 8={"=" * (i // 50)}Э {i}\r')
+                        write(f'  {page}: [{i}] 8={"=" * (i // 50)}Э\r')
                         i += 1
                         yield from xpath(t)
             except LastPageReached as e:
@@ -138,9 +140,7 @@ class JavBusScraper(Scraper):
 
     def get_keyword(self):
 
-        print("Scanning {} for keywords...".format(
-            self.__class__.__name__.rpartition("Scraper")[0]),
-              file=STDERR)
+        print(f"Scanning {self._scraper_name} for keywords...", file=STDERR)
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
@@ -174,9 +174,7 @@ class JavDBScraper(JavBusScraper):
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
 
-        print("Scanning {} for keywords...".format(
-            self.__class__.__name__.rpartition("Scraper")[0]),
-              file=STDERR)
+        print(f"Scanning {self._scraper_name} for keywords...", file=STDERR)
         r = self._scrape(
             '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
             domain="https://javdb.com",
@@ -718,19 +716,19 @@ class Analyzer:
 
         with open(reportfile, "w", encoding="utf-8") as f:
             for line in self._format_report(
-                    total,
-                    total - count,
-                    "Potential ID Prefixes",
-                    prefixcount,
+                    total=total,
+                    count=total - count,
+                    title="Potential ID Prefixes",
+                    result=prefixcount,
             ):
                 print(line, end="")
                 f.write(line)
 
             m = max(len("item"), len(f"{wordcount[0][0]}") if wordcount else 0)
             f.write("\n\nPotential Keywords:\n"
-                    f'{"item":{m}}  word\n'
+                    f'{"item":>{m}}  word\n'
                     f'{"-" * 80}\n')
-            f.writelines(map(f"{{0[0]:{m}d}}  {{0[1]}}\n".format, wordcount))
+            f.writelines(f"{i:{m}d}  {j}\n" for i, j in wordcount)
 
         print(f"Result saved to: {op.abspath(reportfile)}", file=STDERR)
 
@@ -768,10 +766,10 @@ class Analyzer:
 
         with open(report_file, "w", encoding="utf-8") as f:
             for line in self._format_report(
-                    total,
-                    count,
-                    "Matched Strings",
-                    wordcount,
+                    total=total,
+                    count=count,
+                    title="Matched Strings",
+                    result=wordcount,
             ):
                 print(line, end="")
                 f.write(line)
@@ -806,17 +804,17 @@ class Analyzer:
             f"Regex file: {self.regex_file}\n"
             f"Total: {total:,}, Matched: {count:,}, Percentage: {count / total:.2%}\n\n"
             f"{title}:\n"
-            f'item  {"word":{w2}}  strings\n'
+            f'{"item":>{w1}}  {"word":{w2}}  strings\n'
             f'{"-" * width}\n')
         for i, k, s in result:
             yield fmt(i, k, len(s), ", ".join(slc(s, w4)))
 
     @staticmethod
     def _abbr_slice(a: Iterable[str], width: int):
-        i = 0
+        l = 0
         for x in a:
-            i += len(x) + 2
-            if i > width:
+            l += len(x) + 2
+            if l > width:
                 yield "..."
                 break
             yield x
@@ -883,7 +881,7 @@ def progress(iterable, total, start=1, prefix="Progress", width=50):
     if not total:
         return
     write = STDERR.write
-    fmt = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}} Complete\r".format
+    fmt = f"  {prefix} [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}}\r".format
     for i, obj in enumerate(iterable, start):
         write(fmt(i, "█" * (i * width // total), i / total))
         yield obj
