@@ -37,11 +37,11 @@ class LastPageReached(Exception):
 
 
 class Scraper:
+    """Base class for all scrapers."""
 
     __slots__ = "ex"
     ID_RE = JAV_RE
     DATA_RE: str
-    DATAFILE: str
 
     def __init__(self, ex: ThreadPoolExecutor) -> None:
         self.ex = ex
@@ -50,7 +50,6 @@ class Scraper:
 
         print(f"Scanning {self.scraper_name} for product ids...", file=STDERR)
 
-        datafile = op.join("data", self.DATAFILE)
         try:
             data = map(re.compile(self.DATA_RE).search, self._scrape_id())
             data = sorted(frozenset(map(itemgetter(1), filter(None, data))))
@@ -58,19 +57,19 @@ class Scraper:
                 raise ValueError("empty result")
         except Exception as e:
             try:
-                with open(datafile, "r", encoding="utf-8") as f:
+                with open(self.jsonfile, "r", encoding="utf-8") as f:
                     data = json.load(f)
             except (OSError, ValueError):
                 raise e
             else:
                 print(f"Scrapper error, use cache: {e}", file=STDERR)
         else:
-            with open(datafile, "w", encoding="utf-8") as f:
+            with open(self.jsonfile, "w", encoding="utf-8") as f:
                 json.dump(data, f, separators=(",", ":"))
 
         print(f"  Entries: {len(data)}", file=STDERR)
-        r = re.compile(self.ID_RE).fullmatch
-        return filter(None, map(r, map(str.lower, data)))
+        f = re.compile(self.ID_RE).fullmatch
+        return filter(None, map(f, map(str.lower, data)))
 
     def _scrape_id(self) -> Iterator[str]:
         raise NotImplementedError
@@ -79,12 +78,15 @@ class Scraper:
     def scraper_name(self):
         return self.__class__.__name__.rpartition("Scraper")[0]
 
+    @property
+    def jsonfile(self):
+        return op.join("data", self.scraper_name.lower() + ".json")
+
 
 class JavBusScraper(Scraper):
 
     __slots__ = "xpath"
     DATA_RE = r"^\s*([A-Za-z0-9_-]+)\s*$"
-    DATAFILE = "javbus.json"
     STEP = 500
     XP = './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()'
 
@@ -124,8 +126,8 @@ class JavBusScraper(Scraper):
                         write(f'  {page}: [{i}] 8={"=" * (i // 50)}Э\r')
                         i += 1
                         yield from xpath(t)
-            except LastPageReached as e:
-                if e.args[0] > 1:
+            except LastPageReached:
+                if i > 1:
                     write("\n")
                 elif stop_null_page:
                     break
@@ -154,7 +156,6 @@ class JavBusScraper(Scraper):
 class JavDBScraper(JavBusScraper):
 
     __slots__ = ()
-    DATAFILE = "javdb.json"
     STEP = 100
     XP = ('boolean(//nav[@class="pagination"]/ul[@class="pagination-list"]/li'
           '/a[contains(@class, "is-current") and number()=$page])')
@@ -197,20 +198,10 @@ class AVEScraper(Scraper):
 
     __slots__ = ()
     DATA_RE = r"^.+?:\s*([A-Za-z0-9_-]+)\s*$"
-    DATAFILE = "ave.json"
 
     def _scrape_id(self):
 
         url = "https://www.aventertainments.com/studiolists.aspx"
-        page_xp = xp_compile('string(//div[@class="pagination-rev"]'
-                             '/ul/li[a/@title="Next"]'
-                             '/preceding-sibling::li[1]/a/@href)')
-        page_matcher = re.compile(r'(.*CountPage=)(\d+)(.*)', re.I).fullmatch
-        id_xp = xp_compile(
-            '//div[contains(@class, "single-slider-product--list")]'
-            '/small/text()')
-        submit = self.ex.submit
-
         tree = get_tree(url)
         url = tree.base_url
         url = frozenset(
@@ -221,22 +212,30 @@ class AVEScraper(Scraper):
 
         pool = []
         total = len(url)
+        submit = self.ex.submit
         m = {"Rows": 3}
         url = as_completed(submit(get_tree, u, params=m) for u in url)
+        xp_page = xp_compile(
+            'string(//div[@class="pagination-rev"]/ul/li[a/@title="Next"]'
+            '/preceding-sibling::li[1]/a/@href)')
+        re_page = re.compile(r'(.*CountPage=)(\d+)(.*)', re.I).fullmatch
+        xpath = xp_compile(
+            '//div[contains(@class, "single-slider-product--list")]'
+            '/small/text()')
 
         for tree in progress(url, total, prefix="Step 1"):
             tree = tree.result()
-            m = page_matcher(page_xp(tree))
+            m = re_page(xp_page(tree))
             if m:
                 url = f"{urljoin(tree.base_url, m[1])}{{}}{m[3]}".format
                 m = range(2, int(m[2]) + 1)
                 pool.extend(submit(get_tree, url(i)) for i in m)
-            yield from id_xp(tree)
+            yield from xpath(tree)
 
         total = len(pool)
         pool = as_completed(pool)
         for tree in progress(pool, total, prefix="Step 2"):
-            yield from id_xp(tree.result())
+            yield from xpath(tree.result())
 
 
 class DMMScraper(Scraper):
@@ -244,7 +243,6 @@ class DMMScraper(Scraper):
     __slots__ = ()
     DATA_RE = r"/cid=([A-Za-z0-9_-]+)/"
     ID_RE = rf"(?:[a-z]+_)?\d*{JAV_RE}"
-    DATAFILE = "dmm.json"
 
     def _scrape_id(self):
 
@@ -253,9 +251,6 @@ class DMMScraper(Scraper):
             "https://www.dmm.co.jp/digital/videoc/-/list/=/sort=release_date/view=text/",
         )
         submit = self.ex.submit
-        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
-                           '//tr/td[1]/p[@class="ttl"]/a/@href')
-
         pool = {submit(get_tree, u) for u in url}
         for ft in as_completed(pool):
             tree = ft.result()
@@ -270,6 +265,8 @@ class DMMScraper(Scraper):
 
         total = len(pool)
         pool = as_completed(pool)
+        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
+                           '//tr/td[1]/p[@class="ttl"]/a/@href')
         for ft in progress(pool, total):
             yield from xpath(ft.result())
 
@@ -279,21 +276,11 @@ class MGSScraper(Scraper):
     __slots__ = ()
     DATA_RE = r"product_detail/([A-Za-z0-9_-]+)/?$"
     ID_RE = rf"\d*{JAV_RE}"
-    DATAFILE = "mgs.json"
 
     def _scrape_id(self):
 
         url = "https://www.mgstage.com/ppv/makers.php?id=osusume"
-        xp_maker = xp_compile(
-            '//div[@id="maker_list"]/div[@class="maker_list_box"]'
-            '/dl/dt/a[2]/@href[contains(., "search.php")]')
-        xp_last = xp_compile('string(//div[@class="pager_search_bottom"]'
-                             '//a[contains(., "最後")]/@href)')
-        xp_id = xp_compile('//article[@id="center_column"]'
-                           '//div[@class="rank_list"]//li/h5/a/@href')
-        page_matcher = re.compile(r"(.*page=)(\d+)(.*)").fullmatch
         submit = self.ex.submit
-
         tree = get_tree(url)
         url = tree.base_url
         results = tree.xpath('//div[@id="maker_list"]/dl[@class="navi"]'
@@ -304,9 +291,12 @@ class MGSScraper(Scraper):
         total = len(results) + 1
         results = chain(self.ex.map(get_tree, results), (tree,))
         pool = {}
+        xpath = xp_compile(
+            '//div[@id="maker_list"]/div[@class="maker_list_box"]'
+            '/dl/dt/a[2]/@href[contains(., "search.php")]')
         for tree in progress(results, total, prefix="Step 1"):
             url = tree.base_url
-            for m in xp_maker(tree):
+            for m in xpath(tree):
                 m = urljoin(url, m)
                 if m not in pool:
                     pool[m] = submit(get_tree, m)
@@ -314,20 +304,25 @@ class MGSScraper(Scraper):
         total = len(pool)
         results = as_completed(pool.values())
         pool = []
+        xp_page = xp_compile('string(//div[@class="pager_search_bottom"]'
+                             '//a[contains(., "最後")]/@href)')
+        re_page = re.compile(r"(.*page=)(\d+)(.*)").fullmatch
+        xpath = xp_compile('//article[@id="center_column"]'
+                           '//div[@class="rank_list"]//li/h5/a/@href')
         for tree in progress(results, total, prefix="Step 2"):
             tree = tree.result()
-            m = page_matcher(xp_last(tree))
+            m = re_page(xp_page(tree))
             if m:
                 url = f"{urljoin(tree.base_url, m[1])}{{}}{m[3]}".format
                 m = int(m[2]) + 1
                 pool.extend(submit(get_tree, url(i)) for i in range(2, m))
-            yield from xp_id(tree)
+            yield from xpath(tree)
 
         total = len(pool)
         results = as_completed(pool)
         del pool
         for tree in progress(results, total, prefix="Step 3"):
-            yield from xp_id(tree.result())
+            yield from xpath(tree.result())
 
 
 class Builder:
