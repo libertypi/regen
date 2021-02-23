@@ -704,10 +704,11 @@ class Analyzer:
         wordcount = [(i, k)
                      for k, i in wordcount.items()
                      if i >= 5 and k not in freqwords]
-
         f = lambda t: (-t[0], t[1])
         prefixcount.sort(key=f)
         wordcount.sort(key=f)
+        stdout_write = sys.stdout.write
+        m = max(len("item"), len(f"{wordcount[0][0]}") if wordcount else 0)
 
         with open(reportfile, "w", encoding="utf-8") as f:
             for line in self._format_report(
@@ -716,16 +717,15 @@ class Analyzer:
                     title="Potential ID Prefixes",
                     result=prefixcount,
             ):
-                print(line, end="")
+                stdout_write(line)
                 f.write(line)
 
-            m = max(len("item"), len(f"{wordcount[0][0]}") if wordcount else 0)
             f.write("\n\nPotential Keywords:\n"
                     f'{"item":>{m}}  word\n'
                     f'{"-" * 80}\n')
             f.writelines(f"{i:{m}d}  {j}\n" for i, j in wordcount)
 
-        print(f"Result saved to: {op.abspath(reportfile)}", file=STDERR)
+        print(f"Report saved to: {op.abspath(reportfile)}", file=STDERR)
 
     def analyze_nonav(self, local: bool = False):
 
@@ -758,6 +758,7 @@ class Analyzer:
 
         wordcount = [(i, k, strings[k]) for k, i in wordcount.items()]
         wordcount.sort(key=lambda t: (-t[0], t[1]))
+        stdout_write = sys.stdout.write
 
         with open(report_file, "w", encoding="utf-8") as f:
             for line in self._format_report(
@@ -766,9 +767,10 @@ class Analyzer:
                     title="Matched Strings",
                     result=wordcount,
             ):
-                print(line, end="")
+                stdout_write(line)
                 f.write(line)
-        print(f"Result saved to: {op.abspath(report_file)}", file=STDERR)
+
+        print(f"Report saved to: {op.abspath(report_file)}", file=STDERR)
 
     def _match_av(self, path: str) -> Optional[str]:
         """If none video is matched, return all videos in the file (in lower
