@@ -218,7 +218,7 @@ class AVEScraper(Scraper):
         xp_page = xp_compile(
             'string(//div[@class="pagination-rev"]/ul/li[a/@title="Next"]'
             '/preceding-sibling::li[1]/a/@href)')
-        re_page = re.compile(r'(.*CountPage=)(\d+)(.*)', re.I).fullmatch
+        re_page = re.compile(r"(.*CountPage=)(\d+)(.*)", re.I).fullmatch
         xpath = xp_compile(
             '//div[contains(@class, "single-slider-product--list")]'
             '/small/text()')

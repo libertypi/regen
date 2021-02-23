@@ -8,30 +8,29 @@ from regen import Regen
 class Testregen(unittest.TestCase):
 
     def test_extractor(self):
-        values = (
-            (r"A[BC]D", ["ABD", "ACD"]),
-            (r"A(B|CD)E", ["ABE", "ACDE"]),
-            (r"A(B[CD]E|FG)H", ["ABCEH", "ABDEH", "AFGH"]),
-            (r"A(B|(C[DE]|F)G)HI?", [
-                "ABH", "ABHI", "ACDGH", "ACDGHI", "ACEGH", "ACEGHI", "AFGH",
-                "AFGHI"
-            ]),
-            (r"A[BCD]?", ["A", "AB", "AC", "AD"]),
-            (r"A[BC]*D+E{2,5}F?", ["A[BC]*D+E{2,5}", "A[BC]*D+E{2,5}F"]),
-            (r"sky(237)?", ["sky", "sky237"]),
-            (r"[ _-]?", ["", " ", "-", "_"]),
-            (r"A[B3-5]C", ["ABC", "A[3-5]C"]),
-            (r"AB|C()D", ["AB", "CD"]),
-            (r"(A(B|C(D|E)*)*|F)", ["A(B|C[DE]*)*", "F"]),
-            (r"A(\B*\C|\D)?", ["A", "A\\B*\\C", "A\\D"]),
-            (r"(ABC)*", ["(ABC)*"]),
-            (r"((ABC)?)*", ["((ABC)?)*"]),
-            (r"(A|B|C|D){3}", ["[ABCD]{3}"]),
-            (r"(ABC|ABD|AB)+", ["(AB[CD]?)+"]),
-            (r"AB[^CD]|AB[^]]|AB[]]*|ABE",
-             ["ABE", "AB[]]*", "AB[^CD]", "AB[^]]"]),
-        )
-        for regex, answer in values:
+        values = {
+            'A[BC]D': ['ABD', 'ACD'],
+            'A(B|CD)E': ['ABE', 'ACDE'],
+            'A(B[CD]E|FG)H': ['ABCEH', 'ABDEH', 'AFGH'],
+            'A(B|(C[DE]|F)G)HI?': [
+                'ABH', 'ABHI', 'ACDGH', 'ACDGHI', 'ACEGH', 'ACEGHI', 'AFGH',
+                'AFGHI'
+            ],
+            'A[BCD]?': ['A', 'AB', 'AC', 'AD'],
+            'A[BC]*D+E{2,5}F?': ['A[BC]*D+E{2,5}', 'A[BC]*D+E{2,5}F'],
+            'sky(237)?': ['sky', 'sky237'],
+            '[ _-]?': ['', ' ', '-', '_'],
+            'A[B3-5]C': ['ABC', 'A[3-5]C'],
+            'AB|C()D': ['AB', 'CD'],
+            '(A(B|C(D|E)*)*|F)': ['A(B|C[DE]*)*', 'F'],
+            'A(\\B*\\C|\\D)?': ['A', 'A\\B*\\C', 'A\\D'],
+            '(ABC)*': ['(ABC)*'],
+            '((ABC)?)*': ['((ABC)?)*'],
+            '(A|B|C|D){3}': ['[ABCD]{3}'],
+            '(ABC|ABD|AB)+': ['(AB[CD]?)+'],
+            'AB[^CD]|AB[^]]|AB[]]*|ABE': ['ABE', 'AB[]]*', 'AB[^CD]', 'AB[^]]']
+        }
+        for regex, answer in values.items():
             result = Regen([regex]).to_words()
             self.assertEqual(result, answer, msg=result)
 
