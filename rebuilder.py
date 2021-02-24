@@ -12,7 +12,7 @@ from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
                                 as_completed)
 from itertools import chain, count, filterfalse, islice, repeat, tee
 from operator import itemgetter
-from typing import Dict, Iterable, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterable, Iterator, Optional, Tuple, Union
 from urllib.parse import urljoin
 
 import requests
