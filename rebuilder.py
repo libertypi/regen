@@ -474,14 +474,17 @@ class Builder:
 
         return regex
 
-    def _update_file(self, file: str, content: str = None):
-
-        new = () if content is None else [content]
+    @staticmethod
+    def _update_file(file: str, content: str = None):
+        """Update a text file."""
+        new = [] if content is None else [content]
         try:
             with open(file, "r+", encoding="utf-8", newline="\n") as f:
                 old = f.read().splitlines()
                 if not new:
-                    new = self._sort_custom(old)
+                    new.extend(
+                        set(map(str.lower, filter(None, map(str.strip, old)))))
+                    new.sort()
                 if old != new:
                     f.seek(0)
                     f.writelines(i + "\n" for i in new)
@@ -493,10 +496,6 @@ class Builder:
                 f.writelines(i + "\n" for i in new)
             print(f"Create: {file}", file=STDERR)
         return new
-
-    @staticmethod
-    def _sort_custom(a: List[str]) -> List[str]:
-        return sorted(set(map(str.lower, filter(None, map(str.strip, a)))))
 
 
 class MTeamCollector:
