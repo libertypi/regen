@@ -39,16 +39,17 @@ class LastPageReached(Exception):
 class Scraper:
     """Base class for all scrapers."""
 
-    __slots__ = "ex"
-    ID_RE = JAV_RE
+    __slots__ = ("ex", "name")
     DATA_RE: str
+    ID_RE = JAV_RE
 
     def __init__(self, ex: ThreadPoolExecutor) -> None:
         self.ex = ex
+        self.name = self.__class__.__name__.rpartition("Scraper")[0]
 
     def get_id(self) -> Iterator[re.Match]:
 
-        print(f"Scanning {self.scraper_name} for product ids...", file=STDERR)
+        print(f"Scanning {self.name} for product ids...", file=STDERR)
 
         try:
             data = map(re.compile(self.DATA_RE).search, self._scrape_id())
@@ -75,12 +76,8 @@ class Scraper:
         raise NotImplementedError
 
     @property
-    def scraper_name(self):
-        return self.__class__.__name__.rpartition("Scraper")[0]
-
-    @property
     def jsonfile(self):
-        return op.join("data", self.scraper_name.lower() + ".json")
+        return op.join("data", self.name.lower() + ".json")
 
 
 class JavBusScraper(Scraper):
@@ -91,7 +88,7 @@ class JavBusScraper(Scraper):
     XP = './/div[@id="waterfall"]//a[@class="movie-box"]//span/date[1]/text()'
 
     def __init__(self, ex: ThreadPoolExecutor) -> None:
-        self.ex = ex
+        super().__init__(ex)
         self.xpath = xp_compile(self.XP)
 
     @staticmethod
@@ -142,7 +139,7 @@ class JavBusScraper(Scraper):
 
     def get_keyword(self):
 
-        print(f"Scanning {self.scraper_name} for keywords...", file=STDERR)
+        print(f"Scanning {self.name} for keywords...", file=STDERR)
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
@@ -175,7 +172,7 @@ class JavDBScraper(JavBusScraper):
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
 
-        print(f"Scanning {self.scraper_name} for keywords...", file=STDERR)
+        print(f"Scanning {self.name} for keywords...", file=STDERR)
         r = self._scrape(
             '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
             domain="https://javdb.com",
