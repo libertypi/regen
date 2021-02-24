@@ -215,10 +215,10 @@ class AVEScraper(Scraper):
         submit = self.ex.submit
         m = {"Rows": 3}
         url = as_completed(submit(get_tree, u, params=m) for u in url)
+        re_page = re.compile(r"(.*CountPage=)(\d+)(.*)", re.I).fullmatch
         xp_page = xp_compile(
             'string(//div[@class="pagination-rev"]/ul/li[a/@title="Next"]'
             '/preceding-sibling::li[1]/a/@href)')
-        re_page = re.compile(r"(.*CountPage=)(\d+)(.*)", re.I).fullmatch
         xpath = xp_compile(
             '//div[contains(@class, "single-slider-product--list")]'
             '/small/text()')
@@ -304,9 +304,9 @@ class MGSScraper(Scraper):
         total = len(pool)
         results = as_completed(pool.values())
         pool = []
+        re_page = re.compile(r"(.*page=)(\d+)(.*)").fullmatch
         xp_page = xp_compile('string(//div[@class="pager_search_bottom"]'
                              '//a[contains(., "最後")]/@href)')
-        re_page = re.compile(r"(.*page=)(\d+)(.*)").fullmatch
         xpath = xp_compile('//article[@id="center_column"]'
                            '//div[@class="rank_list"]//li/h5/a/@href')
         for tree in progress(results, total, prefix="Step 2"):
