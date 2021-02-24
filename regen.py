@@ -429,7 +429,7 @@ def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
     members to reach the maximum length reduction.
 
     - Yield: Optimal keys
-    - The input set (1st arg) will be finally emptied.
+    - the `unvisited` set will be emptied
     """
     if len(unvisited) == 1:
         yield unvisited.pop()
