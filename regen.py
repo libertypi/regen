@@ -168,6 +168,10 @@ class Parser:
     def _parenStrategy(self):
 
         start = self.index  # 1 char after "("
+        if self.token[start] == "?":
+            raise ValueError(
+                f'Capture group extension "(?...)" is not supported: {self.string}'
+            )
         result = self.result
         hold = self.hold
 
@@ -241,7 +245,7 @@ class Parser:
                         self.token[suffixStart + 1:suffixEnd]):
                     raise ValueError
             except ValueError:
-                raise ValueError(f"Bad range format: {self.string}")
+                raise ValueError(f"Bad repetition range: {self.string}")
 
             self.index = suffixEnd + 1  # 1 char after "}"
             char = self._peek()
@@ -620,14 +624,18 @@ def parse_arguments():
 
 def main():
 
-    from sys import stderr
+    import sys
     args = parse_arguments()
 
     if args.file is None:
-        regen = Regen(args.word)
+        wordlist = args.word
     else:
-        regen = Regen(filter(None, args.file.read().splitlines()))
+        wordlist = filter(None, args.file.read().splitlines())
         args.file.close()
+    try:
+        regen = Regen(wordlist)
+    except ValueError as e:
+        sys.exit(f"Error: {e}")
 
     if args.mode == "extract":
         for word in regen.to_words():
@@ -637,13 +645,13 @@ def main():
         print(regex)
 
         if args.verify:
-            print("\nLength:", len(regex), file=stderr)
+            print("\nLength:", len(regex), file=sys.stderr)
             try:
                 regen.raise_for_verify()
             except ValueError as e:
-                print("Verify failed:", e, file=stderr)
+                print("Verify failed:", e, file=sys.stderr)
             else:
-                print("Verify passed.", file=stderr)
+                print("Verify passed.", file=sys.stderr)
 
 
 if __name__ == "__main__":
