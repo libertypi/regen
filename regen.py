@@ -638,17 +638,13 @@ def main():
         for word in regen.to_words():
             print(word)
     else:
-        regex = regen.to_regex(omitOuterParen=args.omit)
-        print(regex)
-
+        regex = regen.to_regex(args.omit)
         if args.verify:
-            print("\nLength:", len(regex), file=sys.stderr)
             try:
                 regen.raise_for_verify()
             except ValueError as e:
-                print("Verify failed:", e, file=sys.stderr)
-            else:
-                print("Verify passed.", file=sys.stderr)
+                sys.exit(f"Verify failed: {e}\n{regex}")
+        print(regex)
 
 
 if __name__ == "__main__":
