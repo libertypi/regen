@@ -6,8 +6,8 @@ The libary expand a list of regex to a finite set of words, then generate a new
 regular expression using linear optimization to find the near-shortest
 combination. The computed regex should match exactly the same words as input.
 
-The Regen class is intended for external uses. Other classes in the libary are
-for internal uses only.
+The `Regen` class is intended for external uses. Other classes in this libary
+are for internal uses only.
 
 ### Examples:
 
