@@ -643,7 +643,7 @@ def main():
             try:
                 regen.raise_for_verify()
             except ValueError as e:
-                sys.exit(f"Verify failed: {e}\n{regex}")
+                sys.exit(f"Verification failed: {e}\n{regex}")
         print(regex)
 
 
