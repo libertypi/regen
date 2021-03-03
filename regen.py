@@ -64,7 +64,7 @@ class Parser:
 
         if isinstance(_input, str):
             _input = _split_token(_input)
-        if _not_special(_input):  # Not regex we can handle
+        if _not_special(_input):  # Not an regex
             yield tuple(_input)
             return
         if self.index != 0:
