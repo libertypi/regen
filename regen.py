@@ -494,9 +494,9 @@ class Regen:
         >>> regen.to_regex()
         '[AB]B[CD]'
 
-    Wordlist may contain both regexp and strings::
+    Wordlist may contain regular expressions::
 
-        >>> wordlist = ['[AB]B[CD]', 'XYZ']
+        >>> wordlist = ['AB[CD]', 'BB[CD]', 'XYZ']
         >>> regen = Regen(wordlist)
         >>> regen.to_words()
         ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
@@ -537,14 +537,14 @@ class Regen:
                 self._tokens, omitOuterParen)
         return regex
 
-    def raise_for_verify(self):
-        regex = next(iter(self._cache.values()), None)
-        if regex is None:
+    def _verify(self):
+        if self._cache:
+            regex = next(iter(self._cache.values()))
+        else:
             regex = self.to_regex()
         if self._tokens != Regen(regex)._tokens:
-            raise ValueError(
-                "Extraction from computed regex is different from that of original wordlist."
-            )
+            raise ValueError("Extraction from computed regex is different "
+                             "from that of original wordlist.")
         for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
             if _not_special(i):
                 raise ValueError(
@@ -641,7 +641,7 @@ def main():
         regex = regen.to_regex(args.omit)
         if args.verify:
             try:
-                regen.raise_for_verify()
+                regen._verify()
             except ValueError as e:
                 sys.exit(f"Verification failed: {e}\n{regex}")
         print(regex)

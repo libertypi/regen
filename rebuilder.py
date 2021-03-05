@@ -469,7 +469,7 @@ class Builder:
                 file=STDERR)
             regex = concat
         else:
-            regen.raise_for_verify()
+            regen._verify()
             print(f"Regex length: {length} ({diff})", file=STDERR)
 
         return regex
