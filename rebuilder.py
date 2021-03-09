@@ -644,9 +644,8 @@ class Analyzer:
         except (OSError, ValueError) as e:
             sys.exit(e)
         self.ext = re.compile(
-            r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|"
-            r"avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
-            flags=re.M).search
+            r"\.(?:(?:a|bd|w)mv|3g[2p]|[as]vi|asf|f4[abpv]|flv|iso|m(?:2?ts|4p|[24kop]v|p[24e]|pe?g|xf)|og[gv]|qt|rm|rmvb|ts|viv|vob|webm|yuv)$",
+            flags=re.MULTILINE).search
         os.makedirs(self._reportdir, exist_ok=True)
 
     def analyze_av(self, local: bool = False):
