@@ -634,17 +634,15 @@ class Analyzer:
 
         try:
             with open(regex_file, "r", encoding="utf-8") as f:
-                regex = f.readline().strip()
-                if f.read():
-                    raise ValueError("regex file should contain only one line")
+                regex = f.read().strip()
             if "(?" in regex:
                 raise ValueError("regex should have no special groups")
             i = regex.index("(", 1)
             regex = "{}({}".format(regex[:i].replace("(", "(?:"),
                                    regex[i + 1:].replace("(", "(?:"))
+            self.re = re.compile(regex, flags=re.M).search
         except (OSError, ValueError) as e:
             sys.exit(e)
-        self.re = re.compile(regex, flags=re.M).search
         self.ext = re.compile(
             r"\.(?:m(?:p4|[24kop]v|2?ts|4p|p2|pe?g|xf)|wmv|"
             r"avi|iso|3gp|asf|bdmv|flv|rm|rmvb|ts|vob|webm)$",
