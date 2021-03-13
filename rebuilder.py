@@ -834,17 +834,12 @@ def init_session(path: str):
     except FileNotFoundError:
         os.makedirs("data", exist_ok=True)
 
-    set_cookie = session.cookies.set_cookie
-    create_cookie = requests.cookies.create_cookie
-    set_cookie(
-        create_cookie(domain="www.javbus.com", name="existmag", value="all"))
-    set_cookie(
-        create_cookie(domain="dmm.co.jp", name="age_check_done", value="1"))
-    set_cookie(create_cookie(domain="mgstage.com", name="adc", value="1"))
-    set_cookie(
-        create_cookie(domain="www.aventertainments.com",
-                      name="DVDRowData",
-                      value="3"))
+    sc = session.cookies.set_cookie
+    cc = requests.cookies.create_cookie
+    sc(cc(domain="www.javbus.com", name="existmag", value="all"))
+    sc(cc(domain="dmm.co.jp", name="age_check_done", value="1"))
+    sc(cc(domain="mgstage.com", name="adc", value="1"))
+    sc(cc(domain="www.aventertainments.com", name="DVDRowData", value="3"))
 
 
 def get_response(url: str, **kwargs) -> requests.Response:
