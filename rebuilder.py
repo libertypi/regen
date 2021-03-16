@@ -500,14 +500,14 @@ class Builder:
 
 class MTeamCollector:
 
-    DOMAIN = "https://pt.m-team.cc"
-
-    def __init__(self, *, username: str, password: str, page_max: int,
-                 cache_dir: str, av_page: str, non_av_page: str) -> None:
+    def __init__(self, *, domain: str, username: str, password: str,
+                 page_max: int, cache_dir: str, av_page: str,
+                 non_av_page: str) -> None:
 
         if bdecode is None:
             sys.exit("Error: require module 'bencoder.pyx'")
 
+        self._domain = domain
         self._account = {"username": username, "password": password}
         self._page_max = page_max
         self._cachedirs = (
@@ -515,8 +515,8 @@ class MTeamCollector:
             op.join(cache_dir, "av"),
         )
         self._urls = (
-            urljoin(self.DOMAIN, non_av_page),
-            urljoin(self.DOMAIN, av_page),
+            urljoin(self._domain, non_av_page),
+            urljoin(self._domain, av_page),
         )
         for cache_dir in self._cachedirs:
             os.makedirs(cache_dir, exist_ok=True)
@@ -547,7 +547,7 @@ class MTeamCollector:
                 if exists(path):
                     yield path
                 else:
-                    url = urljoin(self.DOMAIN, url)
+                    url = urljoin(self._domain, url)
                     pool[ex.submit(get_response, url)] = url, path
 
             i = str(len(pool))
@@ -597,9 +597,9 @@ class MTeamCollector:
         if "/login.php" in tree.base_url:
             print("Login...", end="", flush=True, file=STDERR)
             session.post(
-                url=self.DOMAIN + "/takelogin.php",
+                url=urljoin(self._domain, "takelogin.php"),
                 data=self._account,
-                headers={"referer": self.DOMAIN + "/login.php"},
+                headers={"referer": urljoin(self._domain, "login.php")},
             )
             tree = get_tree(url, **kwargs)
             if "/login.php" in tree.base_url:
@@ -903,6 +903,7 @@ def parse_config(configfile: str) -> dict:
         "prefix_max": 3000,
         "profile_dir": "builder",
         "mteam": {
+            "domain": "https://pt.m-team.cc",
             "username": "",
             "password": "",
             "page_max": 500,
