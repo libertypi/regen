@@ -42,7 +42,6 @@ from ortools.sat.python.cp_model import (FEASIBLE, OPTIMAL, CpModel, CpSolver,
                                          LinearExpr)
 
 _specials = frozenset(r"{}()[]|?*+")
-_not_special = _specials.isdisjoint
 _rangeChars = frozenset("0123456789,")
 _repetitions = frozenset("*?+{")
 _split_token = re.compile(r"[^\\]|\\.").findall
@@ -64,7 +63,7 @@ class Parser:
 
         if isinstance(_input, str):
             _input = _split_token(_input)
-        if _not_special(_input):  # Not an regex
+        if _specials.isdisjoint(_input):  # Not an regex
             yield tuple(_input)
             return
         if self.index != 0:
@@ -542,11 +541,14 @@ class Regen:
             regex = next(iter(self._cache.values()))
         else:
             regex = self.to_regex()
+
         if self._tokens != Regen(regex)._tokens:
             raise ValueError("Extraction from computed regex is different "
                              "from that of original wordlist.")
+
+        not_special = _specials.union(("\\")).isdisjoint
         for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
-            if _not_special(i):
+            if not_special(i):
                 raise ValueError(
                     f"Computed regex does not fully match this word: '{i}'")
 
