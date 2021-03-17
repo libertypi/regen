@@ -644,7 +644,7 @@ class Analyzer:
         except (OSError, ValueError) as e:
             sys.exit(e)
         self.ext = re.compile(
-            r"\.(?:(?:fl|og|vi|yu)v|3g[2p]|[as]vi|[aw]mv|asf|f4[abpv]|iso|m(?:2?ts|4p|[24kop]v|p[24e]|pe?g|xf)|qt|rm|rmvb|ts|vob|webm)$",
+            r"\.(?:(?:fl|og|vi|yu)v|3g[2p]|[as]vi|[aw]mv|asf|divx|f4[abpv]|hevc|iso|m(?:2?ts|4p|[24kop]v|p[24e]|pe?g|xf)|qt|rm|rmvb|swf|ts|vob|webm)$",
             flags=re.MULTILINE).search
         os.makedirs(self._reportdir, exist_ok=True)
 
