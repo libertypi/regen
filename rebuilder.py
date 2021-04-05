@@ -119,7 +119,7 @@ class JavBusScraper(Scraper):
                             url,
                             range(i, i + self.STEP),
                     ):
-                        stderr_write(f'  {page}: [{i}] 8={"=" * (i // 50)}Э\r')
+                        stderr_write(f'\r  {page}: [{i}] 8={"=" * (i // 50)}Э')
                         i += 1
                         yield from xpath(t)
             except LastPageReached:
@@ -860,7 +860,7 @@ def progress(iterable, total, start=1, prefix="Progress", width=50):
     """Yield items from iterable while printing a progress bar."""
     if not total:
         return
-    fmt = f"  {prefix}: [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}}\r".format
+    fmt = f"\r  {prefix}: [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}}".format
     for i, obj in enumerate(iterable, start):
         stderr_write(fmt(i, "█" * (i * width // total), i / total))
         yield obj
