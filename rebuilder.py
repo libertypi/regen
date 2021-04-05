@@ -27,7 +27,7 @@ try:
 except ImportError:
     bdecode = None
 
-STDERR = sys.stderr
+stderr_write = sys.stderr.write
 JAV_RE = r"([a-z]{3,10})[_-]?([0-9]{2,8})[abcrz]?"
 session = None
 
@@ -49,7 +49,7 @@ class Scraper:
 
     def get_id(self) -> Iterator[re.Match]:
 
-        print(f"Scanning {self.name} for product ids...", file=STDERR)
+        stderr_write(f"Scanning {self.name} for product ids...\n")
 
         try:
             data = map(re.compile(self.DATA_RE).search, self._scrape_id())
@@ -63,12 +63,12 @@ class Scraper:
             except (OSError, ValueError):
                 raise e
             else:
-                print(f"Scrapper error, use cache: {e}", file=STDERR)
+                stderr_write(f"Scrapper error, use cache: {e}\n")
         else:
             with open(self.jsonfile, "w", encoding="utf-8") as f:
                 json.dump(data, f, separators=(",", ":"))
 
-        print(f"  Entries: {len(data)}", file=STDERR)
+        stderr_write(f"  Entries: {len(data)}\n")
         f = re.compile(self.ID_RE).fullmatch
         return filter(None, map(f, map(str.lower, data)))
 
@@ -108,7 +108,6 @@ class JavBusScraper(Scraper):
 
         if isinstance(xpath, str):
             xpath = xp_compile(xpath)
-        write = STDERR.write
 
         for page in pages:
             i = 1
@@ -120,12 +119,12 @@ class JavBusScraper(Scraper):
                             url,
                             range(i, i + self.STEP),
                     ):
-                        write(f'  {page}: [{i}] 8={"=" * (i // 50)}Э\r')
+                        stderr_write(f'  {page}: [{i}] 8={"=" * (i // 50)}Э\r')
                         i += 1
                         yield from xpath(t)
             except LastPageReached:
                 if i > 1:
-                    write("\n")
+                    stderr_write("\n")
                 elif stop_null_page:
                     break
 
@@ -139,7 +138,7 @@ class JavBusScraper(Scraper):
 
     def get_keyword(self):
 
-        print(f"Scanning {self.name} for keywords...", file=STDERR)
+        stderr_write(f"Scanning {self.name} for keywords...\n")
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
@@ -172,7 +171,7 @@ class JavDBScraper(JavBusScraper):
 
     def get_keyword(self) -> Iterable[Tuple[str, int]]:
 
-        print(f"Scanning {self.name} for keywords...", file=STDERR)
+        stderr_write(f"Scanning {self.name} for keywords...\n")
         r = self._scrape(
             '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
             domain="https://javdb.com",
@@ -399,9 +398,9 @@ class Builder:
             filterlist=(keyword,),
         )
 
-        print("-" * 50, file=STDERR)
+        stderr_write("-" * 50 + "\n")
         if not (keyword and prefix):
-            print("Generating regex failed.", file=STDERR)
+            stderr_write("Generating regex failed.\n")
             return
 
         regex = (
@@ -410,7 +409,7 @@ class Builder:
             r"([^a-z0-9]|$)")
         self._update_file(self._regex_file, regex)
 
-        print(f"Result: {len(regex)} chars", file=STDERR)
+        stderr_write(f"Result: {len(regex)} chars\n")
         print(regex)
         return regex
 
@@ -420,10 +419,10 @@ class Builder:
                      omitOuterParen: bool,
                      filterlist: Tuple[str] = None) -> str:
 
-        print(f" {name.upper()} ".center(50, "-"), file=STDERR)
+        stderr_write(f" {name.upper()} ".center(50, "-") + "\n")
         data = data[name]
         total = sum(data.values())
-        print(f"Entry: {total}, {name}: {len(data)}", file=STDERR)
+        stderr_write(f"Entry: {total}, {name}: {len(data)}\n")
 
         words = sorted(data, key=data.get, reverse=True)
         lo = getattr(self, f"_{name}_max")
@@ -440,10 +439,9 @@ class Builder:
         if not words:
             return
 
-        print("Cut: {}, frequency: {}, coverage: {:.1%}".format(
+        stderr_write("Cut: {}, frequency: {}, coverage: {:.1%}\n".format(
             len(words), data[words[-1]],
-            sum(map(data.get, words)) / total),
-              file=STDERR)
+            sum(map(data.get, words)) / total))
 
         whitelist = self._update_file(name + "_whitelist.txt")
         blacklist = self._update_file(name + "_blacklist.txt")
@@ -452,7 +450,7 @@ class Builder:
         words[:] = filterfalse(regex, words)
         words.extend(whitelist)
         words.sort()
-        print(f"Final: {len(words)}", file=STDERR)
+        stderr_write(f"Final: {len(words)}\n")
 
         regen = Regen(words)
         regex = regen.to_regex(omitOuterParen=omitOuterParen)
@@ -463,14 +461,12 @@ class Builder:
         length = len(regex)
         diff = length - len(concat)
         if diff > 0:
-            print(
-                f"Computed regex is {diff} characters "
-                "longer than concatenation, use the latter.",
-                file=STDERR)
+            stderr_write(f"Computed regex is {diff} characters "
+                         "longer than concatenation, use the latter.\n")
             regex = concat
         else:
             regen._verify()
-            print(f"Regex length: {length} ({diff})", file=STDERR)
+            stderr_write(f"Regex length: {length} ({diff})\n")
 
         return regex
 
@@ -489,12 +485,12 @@ class Builder:
                     f.seek(0)
                     f.writelines(i + "\n" for i in new)
                     f.truncate()
-                    print(f"Update: {file}", file=STDERR)
+                    stderr_write(f"Update: {file}\n")
         except FileNotFoundError:
             os.makedirs(op.dirname(file), exist_ok=True)
             with open(file, mode="w", encoding="utf-8", newline="\n") as f:
                 f.writelines(i + "\n" for i in new)
-            print(f"Create: {file}", file=STDERR)
+            stderr_write(f"Create: {file}\n")
         return new
 
 
@@ -530,7 +526,7 @@ class MTeamCollector:
 
     def from_web(self, is_av: bool) -> Iterator[str]:
 
-        print(f"Scanning mteam...", file=STDERR)
+        stderr_write(f"Scanning mteam...\n")
         cachedir = self._cachedirs[is_av]
         pool = {}
         join = op.join
@@ -551,16 +547,16 @@ class MTeamCollector:
                     pool[ex.submit(get_response, url)] = url, path
 
             i = str(len(pool))
-            fmt = f"  [{{:{len(i)}d}}/{i}] {{}}".format
+            fmt = f"  [{{:{len(i)}d}}/{i}] {{}}\n".format
             for i, ft in enumerate(as_completed(pool), 1):
                 url, path = pool.pop(ft)
-                print(fmt(i, url), file=STDERR)
+                stderr_write(fmt(i, url))
                 try:
                     self._parse_torrent(ft.result().content, path)
                 except requests.RequestException as e:
-                    print(e, file=STDERR)
+                    stderr_write(f"{e}\n")
                 except Exception as e:
-                    print(f"Error parsing torrent: {e}", file=STDERR)
+                    stderr_write(f"Error parsing torrent: {e}\n")
                     try:
                         os.unlink(path)
                     except OSError:
@@ -595,7 +591,8 @@ class MTeamCollector:
     def _login(self, url, **kwargs):
         tree = get_tree(url, **kwargs)
         if "/login.php" in tree.base_url:
-            print("Login...", end="", flush=True, file=STDERR)
+            stderr_write("Login...")
+            sys.stderr.flush()
             session.post(
                 url=urljoin(self._domain, "takelogin.php"),
                 data=self._account,
@@ -604,7 +601,7 @@ class MTeamCollector:
             tree = get_tree(url, **kwargs)
             if "/login.php" in tree.base_url:
                 sys.exit("invalid credentials")
-            print("ok", file=STDERR)
+            stderr_write("ok\n")
         return tree
 
     @staticmethod
@@ -650,7 +647,7 @@ class Analyzer:
 
     def analyze_av(self, local: bool = False):
 
-        print("Matching test begins with av torrents...", file=STDERR)
+        stderr_write("Matching test begins with av torrents...\n")
 
         reportfile = op.join(self._reportdir, "av_report.txt")
         rawfile = op.join(self._reportdir, "mismatch_raw.txt")
@@ -700,7 +697,6 @@ class Analyzer:
         f = lambda t: (-t[0], t[1])
         prefixcount.sort(key=f)
         wordcount.sort(key=f)
-        stdout_write = sys.stdout.write
         m = max(len("item"), len(f"{wordcount[0][0]}") if wordcount else 0)
 
         with open(reportfile, "w", encoding="utf-8") as f:
@@ -710,7 +706,7 @@ class Analyzer:
                     title="Potential ID Prefixes",
                     result=prefixcount,
             ):
-                stdout_write(line)
+                stderr_write(line)
                 f.write(line)
 
             f.write("\n\nPotential Keywords:\n"
@@ -718,11 +714,11 @@ class Analyzer:
                     f'{"-" * 80}\n')
             f.writelines(f"{i:{m}d}  {j}\n" for i, j in wordcount)
 
-        print(f"Report saved to: {op.abspath(reportfile)}", file=STDERR)
+        stderr_write(f"Report saved to: {op.abspath(reportfile)}\n")
 
     def analyze_nonav(self, local: bool = False):
 
-        print("Matching test begins with non-av torrents...", file=STDERR)
+        stderr_write("Matching test begins with non-av torrents...\n")
 
         report_file = op.join(self._reportdir, "nonav_report.txt")
         total = count = 0
@@ -751,7 +747,6 @@ class Analyzer:
 
         wordcount = [(i, k, strings[k]) for k, i in wordcount.items()]
         wordcount.sort(key=lambda t: (-t[0], t[1]))
-        stdout_write = sys.stdout.write
 
         with open(report_file, "w", encoding="utf-8") as f:
             for line in self._format_report(
@@ -760,10 +755,10 @@ class Analyzer:
                     title="Matched Strings",
                     result=wordcount,
             ):
-                stdout_write(line)
+                stderr_write(line)
                 f.write(line)
 
-        print(f"Report saved to: {op.abspath(report_file)}", file=STDERR)
+        stderr_write(f"Report saved to: {op.abspath(report_file)}\n")
 
     def _match_av(self, path: str) -> Optional[str]:
         """If none video is matched, return all videos in the file (in lower
@@ -865,12 +860,11 @@ def progress(iterable, total, start=1, prefix="Progress", width=50):
     """Yield items from iterable while printing a progress bar."""
     if not total:
         return
-    write = STDERR.write
     fmt = f"  {prefix}: [{{:{len(str(total))}d}}/{total}] |{{:-<{width}}}| {{:.1%}}\r".format
     for i, obj in enumerate(iterable, start):
-        write(fmt(i, "█" * (i * width // total), i / total))
+        stderr_write(fmt(i, "█" * (i * width // total), i / total))
         yield obj
-    write("\n")
+    stderr_write("\n")
 
 
 def dump_cookies(path: str):
