@@ -832,6 +832,7 @@ def init_session(path: str):
     sc = session.cookies.set_cookie
     cc = requests.cookies.create_cookie
     sc(cc(domain="www.javbus.com", name="existmag", value="all"))
+    sc(cc(domain="javdb.com", name="over18", value="1"))
     sc(cc(domain="dmm.co.jp", name="age_check_done", value="1"))
     sc(cc(domain="mgstage.com", name="adc", value="1"))
     sc(cc(domain="www.aventertainments.com", name="DVDRowData", value="3"))
