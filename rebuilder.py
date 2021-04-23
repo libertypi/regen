@@ -288,8 +288,8 @@ class MGSScraper(Scraper):
         results = chain(self.ex.map(get_tree, results), (tree,))
         pool = {}
         xpath = xp_compile(
-            '//div[@id="maker_list"]/div[@class="maker_list_box"]'
-            '/dl/dt/a[2]/@href[contains(., "search.php")]')
+            '//div[@id="maker_list"]/div[@class="maker_list_box"]/dl/dt/a[1]/@href'
+        )
         for tree in progress(results, total, prefix="Step 1"):
             url = tree.base_url
             for m in xpath(tree):
