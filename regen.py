@@ -30,7 +30,7 @@ are for internal uses only.
 ### Author: `David Pi`
 """
 
-__all__ = ("Regen",)
+__all__ = ("Regen", )
 
 import re
 from collections import defaultdict
@@ -81,7 +81,7 @@ class Parser:
                 if char == "|":
                     self._concat_hold()
                     yield from map(tuple, result)
-                    result[:] = ([],)
+                    result[:] = ([], )
                 elif char == "[":
                     self._charsetStrategy()
                 elif char == "(":
@@ -102,7 +102,7 @@ class Parser:
 
         self._concat_hold()
         yield from map(tuple, result)
-        result[:] = ([],)
+        result[:] = ([], )
         self.index = 0
         self.token = None
 
@@ -139,7 +139,8 @@ class Parser:
                             hi = eat()
                             char = f"[{lo}{char}{hi}]"
                     else:
-                        raise ValueError(f"Nested character set: {self.string}")
+                        raise ValueError(
+                            f"Nested character set: {self.string}")
                 charset.append(char)
                 char = eat()
             else:
@@ -381,9 +382,9 @@ def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
     if len(tokenSet) > 1:
         char = sorted(chain.from_iterable(tokenSet))
 
-        if ("]",) in tokenSet:
+        if ("]", ) in tokenSet:
             char.insert(0, char.pop(char.index("]")))
-        if ("-",) in tokenSet:
+        if ("-", ) in tokenSet:
             char.append(char.pop(char.index("-")))
 
         return f'[{"".join(char)}]{quantifier}'
@@ -458,7 +459,7 @@ def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
             currentVarNot = pool[currentKey].Not()
 
             if () in currentKey:
-                currentKey = currentKey.difference(((),))
+                currentKey = currentKey.difference(((), ))
 
             for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
                 nextVar = pool_get(nextKey)
@@ -469,8 +470,8 @@ def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
                 AddImplication(nextVar, currentVarNot)
 
         model.Maximize(
-            LinearExpr.ScalProd(pool.values(),
-                                tuple(candidate[k][0] for k in pool)))
+            LinearExpr.WeightedSum(tuple(pool.values()),
+                                   tuple(candidate[k][0] for k in pool)))
 
         solver = CpSolver()
         status = solver.Solve(model)
@@ -511,7 +512,7 @@ class Regen:
         :param wordlist: An iterable of strings contains words and/or regexps.
         """
         if isinstance(wordlist, str):
-            wordlist = (wordlist,)
+            wordlist = (wordlist, )
         elif not isinstance(wordlist, Iterable):
             raise TypeError("Input should be a list of strings.")
         parser = Parser()

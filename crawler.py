@@ -142,52 +142,11 @@ class JavBusScraper(Scraper):
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
-            pages=chain(("/page/",), (f"/studio/{i}/" for i in count(1))),
+            pages=chain(("/page/", ), (f"/studio/{i}/" for i in count(1))),
             stop_null_page=True,
         )
         f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
         return Counter(m[1].lower() for m in map(f, r) if m).items()
-
-
-class JavDBScraper(JavBusScraper):
-
-    __slots__ = ()
-    STEP = 100
-    XP = ('boolean(//nav[@class="pagination"]/ul[@class="pagination-list"]/li'
-          '/a[contains(@class, "is-current") and number()=$page])')
-
-    def get_tree(self, url: str, i: int):
-        tree = get_tree(f"{url}?page={i}")
-        if self.xpath(tree, page=i):
-            return tree
-        raise LastPageReached(i)
-
-    def _scrape_id(self) -> Iterator[str]:
-        return self._scrape(
-            './/div[@id="videos"]//a[@class="box"]/div[@class="uid"]/text()',
-            domain="https://javdb.com",
-            pages=("/", "/uncensored"),
-        )
-
-    def get_keyword(self) -> Iterable[Tuple[str, int]]:
-
-        stderr_write(f"Scanning {self.name} for keywords...\n")
-        r = self._scrape(
-            '//div[@id="series"]//div[@class="box"]/a[@title and strong and span]',
-            domain="https://javdb.com",
-            pages=("/series/western",),
-        )
-        subspace = re.compile(r"\s+").sub
-        retitle = re.compile(r"(?!\d+$)[a-z0-9]{3,}").fullmatch
-        redigit = re.compile(r"\d+").search
-
-        for a in r:
-            title = subspace("", a.findtext("strong")).lower()
-            if retitle(title):
-                try:
-                    yield title, int(redigit(a.findtext("span"))[0])
-                except TypeError:
-                    pass
 
 
 class AVEScraper(Scraper):
@@ -197,7 +156,7 @@ class AVEScraper(Scraper):
 
     def _scrape_id(self):
 
-        url = "https://www.aventertainments.com/studiolists.aspx"
+        url = "https://www.aventertainments.com/studiolists.aspx?dept_id=29"
         tree = get_tree(url)
         url = tree.base_url
         url = frozenset(
@@ -285,7 +244,7 @@ class MGSScraper(Scraper):
         results.discard(url)
 
         total = len(results) + 1
-        results = chain(self.ex.map(get_tree, results), (tree,))
+        results = chain(self.ex.map(get_tree, results), (tree, ))
         pool = {}
         xpath = xp_compile(
             '//div[@id="maker_list"]/div[@class="maker_list_box"]/dl/dt/a[1]/@href'
@@ -343,13 +302,8 @@ class Builder:
     def from_web(self) -> Optional[str]:
 
         with ThreadPoolExecutor() as ex:
-            scrapers = (
-                JavBusScraper(ex),
-                JavDBScraper(ex),
-                AVEScraper(ex),
-                DMMScraper(ex),
-                MGSScraper(ex),
-            )
+            scrapers = (JavBusScraper(ex), AVEScraper(ex), DMMScraper(ex),
+                        MGSScraper(ex))
             data = {
                 "prefix": self._scrape_prefix(scrapers),
                 "keyword": self._scrape_keyword(scrapers, ex),
@@ -395,7 +349,7 @@ class Builder:
             name="prefix",
             data=data,
             omitOuterParen=False,
-            filterlist=(keyword,),
+            _filter=keyword,
         )
 
         stderr_write("-" * 50 + "\n")
@@ -417,7 +371,7 @@ class Builder:
                      name: str,
                      data: Dict[str, dict],
                      omitOuterParen: bool,
-                     filterlist: Tuple[str] = None) -> str:
+                     _filter: str = None) -> str:
 
         stderr_write(f" {name.upper()} ".center(50, "-") + "\n")
         data = data[name]
@@ -436,16 +390,15 @@ class Builder:
                 else:
                     lo = mid + 1
             words = words[:lo]
-        if not words:
-            return
 
-        stderr_write("Cut: {}, frequency: {}, coverage: {:.1%}\n".format(
-            len(words), data[words[-1]],
-            sum(map(data.get, words)) / total))
+        if words:
+            stderr_write("Cut: {}, frequency: {}, coverage: {:.1%}\n".format(
+                len(words), data[words[-1]],
+                sum(map(data.get, words)) / total))
 
         whitelist = self._update_file(name + "_whitelist.txt")
         blacklist = self._update_file(name + "_blacklist.txt")
-        regex = chain(whitelist, blacklist, filterlist or ())
+        regex = chain(whitelist, blacklist, (_filter, ) if _filter else ())
         regex = re.compile("|".join(regex)).fullmatch
         words[:] = filterfalse(regex, words)
         words.extend(whitelist)
@@ -688,11 +641,9 @@ class Analyzer:
                     tmp.clear()
             freqwords = freqwords.result()
 
-        prefixcount = [
-            (i, k, strings[k]) for k, i in prefixcount.items() if i >= 5
-        ]
-        wordcount = [(i, k)
-                     for k, i in wordcount.items()
+        prefixcount = [(i, k, strings[k]) for k, i in prefixcount.items()
+                       if i >= 5]
+        wordcount = [(i, k) for k, i in wordcount.items()
                      if i >= 5 and k not in freqwords]
         f = lambda t: (-t[0], t[1])
         prefixcount.sort(key=f)
@@ -772,8 +723,7 @@ class Analyzer:
         """Return all matched videos in the file (in lower case). """
         with open(path, "r", encoding="utf-8") as f:
             return tuple(
-                m[1]
-                for m in map(self.re, filter(self.ext, map(str.lower, f)))
+                m[1] for m in map(self.re, filter(self.ext, map(str.lower, f)))
                 if m)
 
     def _format_report(self, total, count, title, result, width=80):
@@ -812,13 +762,15 @@ def init_session(path: str):
     global session
     session = requests.Session()
     session.headers.update({
-        "User-Agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/88.0.4324.104 Safari/537.36'
+        "User-Agent":
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/88.0.4324.104 Safari/537.36'
     })
     adapter = requests.adapters.HTTPAdapter(
         max_retries=Retry(total=7,
-                          status_forcelist=frozenset((500, 502, 503, 504, 521)),
+                          status_forcelist=frozenset((500, 502, 503, 504,
+                                                      521)),
                           backoff_factor=0.3))
     session.mount("http://", adapter)
     session.mount("https://", adapter)
@@ -853,7 +805,8 @@ def get_tree(url: str, **kwargs) -> HtmlElement:
 def get_freqwords(lo=3, k: int = 3000):
     """Get wordlist of the top `k` English words longer than `lo` letters."""
     u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$", get_response(u).text, re.M)
+    m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$",
+                    get_response(u).text, re.M)
     return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
 
 
@@ -961,29 +914,29 @@ def parse_arguments():
     )
 
     group = parser.add_argument_group(
-        title="config override (override corresponding setting in config file)")
+        title="override corresponding settings in config file")
     group.add_argument(
-        "--file",
-        dest="file",
+        "-f",
+        dest="regex_file",
         action="store",
         help="the target file, override 'regex_file'",
     )
     group.add_argument(
-        "--kmax",
+        "-km",
         dest="keyword_max",
         action="store",
         type=int,
         help="maximum keywords, override 'keyword_max' (0 for unlimited)",
     )
     group.add_argument(
-        "--pmax",
+        "-pm",
         dest="prefix_max",
         action="store",
         type=int,
         help="maximum prefixes, override 'prefix_max' (0 for unlimited)",
     )
     group.add_argument(
-        "--mtmax",
+        "-mm",
         dest="mteam_max",
         action="store",
         type=int,
@@ -999,6 +952,13 @@ def main():
 
     path = op.dirname(__file__)
     config = parse_config(op.join(path, "config.json"))
+
+    # config overwride
+    for k in "regex_file", "keyword_max", "prefix_max", "mteam_max":
+        v = getattr(args, k)
+        if v:
+            config[k] = v
+
     path = op.join(path, config["profile_dir"])
     try:
         os.chdir(path)
@@ -1008,24 +968,13 @@ def main():
     path = op.join("data", "cookies")
     init_session(path)
 
-    if args.file:
-        config["regex_file"] = args.file
-
     if args.mode == "build":
-        if args.keyword_max is not None:
-            config["keyword_max"] = args.keyword_max
-        if args.prefix_max is not None:
-            config["prefix_max"] = args.prefix_max
-
         builder = Builder(**config)
         if args.local:
             builder.from_cache()
         else:
             builder.from_web()
     else:
-        if args.mteam_max is not None:
-            config["mteam"]["page_max"] = args.mteam_max
-
         analyzer = Analyzer(**config)
         if args.mode == "test_av":
             analyzer.analyze_av(args.local)
