@@ -8,8 +8,7 @@ import pickle
 import re
 import sys
 from collections import Counter, defaultdict
-from concurrent.futures import (ProcessPoolExecutor, ThreadPoolExecutor,
-                                as_completed)
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 from itertools import chain, count, filterfalse, islice, repeat, tee
 from operator import itemgetter
 from typing import Dict, Iterable, Iterator, Optional, Tuple, Union
@@ -23,6 +22,7 @@ from lxml.html import fromstring as html_fromstring
 from regen import Regen
 
 try:
+    # pip install bencoder.pyx
     from bencoder import bdecode
 except ImportError:
     bdecode = None
@@ -48,7 +48,6 @@ class Scraper:
         self.name = self.__class__.__name__.rpartition("Scraper")[0]
 
     def get_id(self) -> Iterator[re.Match]:
-
         stderr_write(f"Scanning {self.name} for product ids...\n")
 
         try:
@@ -81,7 +80,6 @@ class Scraper:
 
 
 class JavBusScraper(Scraper):
-
     __slots__ = "xpath"
     DATA_RE = r"^\s*([A-Za-z0-9_-]+)\s*$"
     STEP = 500
@@ -100,12 +98,13 @@ class JavBusScraper(Scraper):
                 raise LastPageReached(i)
             raise
 
-    def _scrape(self,
-                xpath: Union[XPath, str],
-                domain: str,
-                pages: Iterable[str],
-                stop_null_page: bool = False):
-
+    def _scrape(
+        self,
+        xpath: Union[XPath, str],
+        domain: str,
+        pages: Iterable[str],
+        stop_null_page: bool = False,
+    ):
         if isinstance(xpath, str):
             xpath = xp_compile(xpath)
 
@@ -115,9 +114,9 @@ class JavBusScraper(Scraper):
             try:
                 while True:
                     for t in self.ex.map(
-                            self.get_tree,
-                            url,
-                            range(i, i + self.STEP),
+                        self.get_tree,
+                        url,
+                        range(i, i + self.STEP),
                     ):
                         stderr_write(f'\r  {page}: [{i}] 8={"=" * (i // 50)}Э')
                         i += 1
@@ -132,17 +131,20 @@ class JavBusScraper(Scraper):
         return self._scrape(
             self.xpath,
             domain="https://www.javbus.com",
-            pages=("/page/", "/uncensored/page/", "/genre/hd/",
-                   "/uncensored/genre/hd/"),
+            pages=(
+                "/page/",
+                "/uncensored/page/",
+                "/genre/hd/",
+                "/uncensored/genre/hd/",
+            ),
         )
 
     def get_keyword(self):
-
         stderr_write(f"Scanning {self.name} for keywords...\n")
         r = self._scrape(
             self.xpath,
             domain="https://www.javbus.org",
-            pages=chain(("/page/", ), (f"/studio/{i}/" for i in count(1))),
+            pages=chain(("/page/",), (f"/studio/{i}/" for i in count(1))),
             stop_null_page=True,
         )
         f = re.compile(r"\s*([A-Za-z0-9]{3,})(?:\.\d\d){3}\s*").fullmatch
@@ -150,20 +152,21 @@ class JavBusScraper(Scraper):
 
 
 class AVEScraper(Scraper):
-
     __slots__ = ()
     DATA_RE = r"^.+?:\s*([A-Za-z0-9_-]+)\s*$"
 
     def _scrape_id(self):
-
         url = "https://www.aventertainments.com/studiolists.aspx?dept_id=29"
         tree = get_tree(url)
         url = tree.base_url
         url = frozenset(
-            urljoin(url, u) for u in tree.xpath(
+            urljoin(url, u)
+            for u in tree.xpath(
                 '//div[contains(@class, "category-group-list")]'
                 '/a/@href[contains(., "studio_products.aspx")]',
-                smart_string=False))
+                smart_string=False,
+            )
+        )
 
         pool = []
         total = len(url)
@@ -173,10 +176,11 @@ class AVEScraper(Scraper):
         re_page = re.compile(r"(.*CountPage=)(\d+)(.*)", re.I).fullmatch
         xp_page = xp_compile(
             'string(//div[@class="pagination-rev"]/ul/li[a/@title="Next"]'
-            '/preceding-sibling::li[1]/a/@href)')
+            "/preceding-sibling::li[1]/a/@href)"
+        )
         xpath = xp_compile(
-            '//div[contains(@class, "single-slider-product--list")]'
-            '/small/text()')
+            '//div[contains(@class, "single-slider-product--list")]' "/small/text()"
+        )
 
         for tree in progress(url, total, prefix="Step 1"):
             tree = tree.result()
@@ -194,13 +198,11 @@ class AVEScraper(Scraper):
 
 
 class DMMScraper(Scraper):
-
     __slots__ = ()
     DATA_RE = r"/cid=([A-Za-z0-9_-]+)/"
     ID_RE = rf"(?:[a-z]+_)?\d*{JAV_RE}"
 
     def _scrape_id(self):
-
         url = (
             "https://www.dmm.co.jp/digital/videoa/-/list/=/sort=release_date/view=text/",
             "https://www.dmm.co.jp/digital/videoc/-/list/=/sort=release_date/view=text/",
@@ -211,40 +213,42 @@ class DMMScraper(Scraper):
             tree = ft.result()
             total = tree.xpath(
                 'string(.//div[@class="list-capt"]//li[@class="terminal"]'
-                '/a/@href[contains(., "/page=")])')
-            total = re.fullmatch(r"(.*/page=)(\d+)(/.*)",
-                                 urljoin(tree.base_url, total))
+                '/a/@href[contains(., "/page=")])'
+            )
+            total = re.fullmatch(r"(.*/page=)(\d+)(/.*)", urljoin(tree.base_url, total))
             url = f"{total[1]}{{}}{total[3]}".format
             total = range(2, int(total[2]) + 1)
             pool.update(submit(get_tree, url(i)) for i in total)
 
         total = len(pool)
         pool = as_completed(pool)
-        xpath = xp_compile('.//div[@class="d-area"]//div[@class="d-item"]'
-                           '//tr/td[1]/p[@class="ttl"]/a/@href')
+        xpath = xp_compile(
+            './/div[@class="d-area"]//div[@class="d-item"]'
+            '//tr/td[1]/p[@class="ttl"]/a/@href'
+        )
         for ft in progress(pool, total):
             yield from xpath(ft.result())
 
 
 class MGSScraper(Scraper):
-
     __slots__ = ()
     DATA_RE = r"product_detail/([A-Za-z0-9_-]+)/?$"
     ID_RE = rf"\d*{JAV_RE}"
 
     def _scrape_id(self):
-
         url = "https://www.mgstage.com/ppv/makers.php?id=osusume"
         submit = self.ex.submit
         tree = get_tree(url)
         url = tree.base_url
-        results = tree.xpath('//div[@id="maker_list"]/dl[@class="navi"]'
-                             '/dd/a/@href[contains(., "makers.php")]')
+        results = tree.xpath(
+            '//div[@id="maker_list"]/dl[@class="navi"]'
+            '/dd/a/@href[contains(., "makers.php")]'
+        )
         results = {urljoin(url, u) for u in results}
         results.discard(url)
 
         total = len(results) + 1
-        results = chain(self.ex.map(get_tree, results), (tree, ))
+        results = chain(self.ex.map(get_tree, results), (tree,))
         pool = {}
         xpath = xp_compile(
             '//div[@id="maker_list"]/div[@class="maker_list_box"]/dl/dt/a[1]/@href'
@@ -260,10 +264,12 @@ class MGSScraper(Scraper):
         results = as_completed(pool.values())
         pool = []
         re_page = re.compile(r"(.*page=)(\d+)(.*)").fullmatch
-        xp_page = xp_compile('string(//div[@class="pager_search_bottom"]'
-                             '//a[contains(., "最後")]/@href)')
-        xpath = xp_compile('//article[@id="center_column"]'
-                           '//div[@class="rank_list"]//li/h5/a/@href')
+        xp_page = xp_compile(
+            'string(//div[@class="pager_search_bottom"]' '//a[contains(., "最後")]/@href)'
+        )
+        xpath = xp_compile(
+            '//article[@id="center_column"]' '//div[@class="rank_list"]//li/h5/a/@href'
+        )
         for tree in progress(results, total, prefix="Step 2"):
             tree = tree.result()
             m = re_page(xp_page(tree))
@@ -281,10 +287,9 @@ class MGSScraper(Scraper):
 
 
 class Builder:
-
-    def __init__(self, *, regex_file: str, keyword_max: int, prefix_max: int,
-                 **kwargs) -> None:
-
+    def __init__(
+        self, *, regex_file: str, keyword_max: int, prefix_max: int, **kwargs
+    ) -> None:
         self._regex_file = regex_file
         self._keyword_max = keyword_max
         self._prefix_max = prefix_max
@@ -295,15 +300,20 @@ class Builder:
             with open(self._datafile, "r", encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, ValueError) as e:
-            sys.exit("Loading local cache failed. A full "
-                     f"web scrape may fix the problem.\n{e}")
+            sys.exit(
+                "Loading local cache failed. A full "
+                f"web scrape may fix the problem.\n{e}"
+            )
         return self._build(data)
 
     def from_web(self) -> Optional[str]:
-
         with ThreadPoolExecutor() as ex:
-            scrapers = (JavBusScraper(ex), AVEScraper(ex), DMMScraper(ex),
-                        MGSScraper(ex))
+            scrapers = (
+                JavBusScraper(ex),
+                AVEScraper(ex),
+                DMMScraper(ex),
+                MGSScraper(ex),
+            )
             data = {
                 "prefix": self._scrape_prefix(scrapers),
                 "keyword": self._scrape_keyword(scrapers, ex),
@@ -339,7 +349,6 @@ class Builder:
         return dict(d)
 
     def _build(self, data: Dict[str, dict]):
-
         keyword = self._build_regex(
             name="keyword",
             data=data,
@@ -360,19 +369,21 @@ class Builder:
         regex = (
             r"(^|[^a-z0-9])"
             rf"({keyword}|[0-9]{{,5}}{prefix}[_-]?[0-9]{{2,8}}([abcrz]|f?hd)?)"
-            r"([^a-z0-9]|$)")
+            r"([^a-z0-9]|$)"
+        )
         self._update_file(self._regex_file, regex)
 
         stderr_write(f"Result: {len(regex)} chars\n")
         print(regex)
         return regex
 
-    def _build_regex(self,
-                     name: str,
-                     data: Dict[str, dict],
-                     omitOuterParen: bool,
-                     _filter: str = None) -> str:
-
+    def _build_regex(
+        self,
+        name: str,
+        data: Dict[str, dict],
+        omitOuterParen: bool,
+        _filter: str = None,
+    ) -> str:
         stderr_write(f" {name.upper()} ".center(50, "-") + "\n")
         data = data[name]
         total = sum(data.values())
@@ -392,13 +403,15 @@ class Builder:
             words = words[:lo]
 
         if words:
-            stderr_write("Cut: {}, frequency: {}, coverage: {:.1%}\n".format(
-                len(words), data[words[-1]],
-                sum(map(data.get, words)) / total))
+            stderr_write(
+                "Cut: {}, frequency: {}, coverage: {:.1%}\n".format(
+                    len(words), data[words[-1]], sum(map(data.get, words)) / total
+                )
+            )
 
         whitelist = self._update_file(name + "_whitelist.txt")
         blacklist = self._update_file(name + "_blacklist.txt")
-        regex = chain(whitelist, blacklist, (_filter, ) if _filter else ())
+        regex = chain(whitelist, blacklist, (_filter,) if _filter else ())
         regex = re.compile("|".join(regex)).fullmatch
         words[:] = filterfalse(regex, words)
         words.extend(whitelist)
@@ -414,8 +427,10 @@ class Builder:
         length = len(regex)
         diff = length - len(concat)
         if diff > 0:
-            stderr_write(f"Computed regex is {diff} characters "
-                         "longer than concatenation, use the latter.\n")
+            stderr_write(
+                f"Computed regex is {diff} characters "
+                "longer than concatenation, use the latter.\n"
+            )
             regex = concat
         else:
             regen._verify()
@@ -431,8 +446,7 @@ class Builder:
             with open(file, "r+", encoding="utf-8", newline="\n") as f:
                 old = f.read().splitlines()
                 if not new:
-                    new.extend(
-                        set(map(str.lower, filter(None, map(str.strip, old)))))
+                    new.extend(set(map(str.lower, filter(None, map(str.strip, old)))))
                     new.sort()
                 if old != new:
                     f.seek(0)
@@ -448,11 +462,17 @@ class Builder:
 
 
 class MTeamCollector:
-
-    def __init__(self, *, domain: str, username: str, password: str,
-                 page_max: int, cache_dir: str, av_page: str,
-                 non_av_page: str) -> None:
-
+    def __init__(
+        self,
+        *,
+        domain: str,
+        username: str,
+        password: str,
+        page_max: int,
+        cache_dir: str,
+        av_page: str,
+        non_av_page: str,
+    ) -> None:
         if bdecode is None:
             sys.exit("Error: require module 'bencoder.pyx'")
 
@@ -478,7 +498,6 @@ class MTeamCollector:
                     yield entry.path
 
     def from_web(self, is_av: bool) -> Iterator[str]:
-
         stderr_write(f"Scanning mteam...\n")
         cachedir = self._cachedirs[is_av]
         pool = {}
@@ -487,7 +506,6 @@ class MTeamCollector:
         matcher = re.compile(r"\bid=([0-9]+)").search
 
         with ThreadPoolExecutor() as ex:
-
             for url in self._get_links(self._urls[is_av], ex):
                 try:
                     path = join(cachedir, matcher(url)[1] + ".txt")
@@ -524,18 +542,19 @@ class MTeamCollector:
         tree = self._login(url, params={"page": 0})
         total = tree.xpath(
             'string(//td[@id="outer"]/table//td/p[@align="center"]'
-            '/a[contains(@href, "page=")][last()]/@href)')
+            '/a[contains(@href, "page=")][last()]/@href)'
+        )
         total = int(re.search(r"\bpage=(\d+)", total)[1]) + 1
         if 0 < self._page_max < total:
             total = self._page_max
 
-        pool = as_completed({
-            ex.submit(get_tree, url, params={"page": i})
-            for i in range(1, total)
-        })
+        pool = as_completed(
+            {ex.submit(get_tree, url, params={"page": i}) for i in range(1, total)}
+        )
         xpath = xp_compile(
             '//form[@id="form_torrent"]//table[@class="torrentname"]'
-            '/descendant::a[contains(@href, "download.php?")][1]/@href')
+            '/descendant::a[contains(@href, "download.php?")][1]/@href'
+        )
         yield from xpath(tree)
 
         for tree in progress(pool, total, 2):
@@ -561,23 +580,23 @@ class MTeamCollector:
     def _parse_torrent(content: bytes, path: str):
         """decode a torrent, write file list to `path`."""
         info = bdecode(content)[b"info"]
-        name = (info[b"name.utf-8"] if b"name.utf-8" in info else
-                info[b"name"]).decode(errors="ignore")
+        name = (info[b"name.utf-8"] if b"name.utf-8" in info else info[b"name"]).decode(
+            errors="ignore"
+        )
         with open(path, "w", encoding="utf-8") as f:
             if b"files" in info:
                 files = info[b"files"]
                 k = b"path.utf-8" if b"path.utf-8" in files[0] else b"path"
                 join = b"/".join
-                f.writelines(f'{name}/{join(p[k]).decode(errors="ignore")}\n'
-                             for p in files)
+                f.writelines(
+                    f'{name}/{join(p[k]).decode(errors="ignore")}\n' for p in files
+                )
             else:
                 f.write(name + "\n")
 
 
 class Analyzer:
-
     def __init__(self, *, regex_file: str, mteam: dict, **kwargs) -> None:
-
         self.regex_file = regex_file
         self._reportdir = "report"
         self._mteam = MTeamCollector(**mteam)
@@ -588,18 +607,19 @@ class Analyzer:
             if "(?" in regex:
                 raise ValueError("regex should have no special groups")
             i = regex.index("(", 1)
-            regex = "{}({}".format(regex[:i].replace("(", "(?:"),
-                                   regex[i + 1:].replace("(", "(?:"))
+            regex = "{}({}".format(
+                regex[:i].replace("(", "(?:"), regex[i + 1 :].replace("(", "(?:")
+            )
             self.re = re.compile(regex, flags=re.M).search
         except (OSError, ValueError) as e:
             sys.exit(e)
         self.ext = re.compile(
             r"\.(?:(?:fl|og|vi|yu)v|3g[2p]|[as]vi|[aw]mv|asf|divx|f4[abpv]|hevc|iso|m(?:2?ts|4p|[24kop]v|p[24e]|pe?g|xf)|qt|rm|rmvb|swf|ts|vob|webm)$",
-            flags=re.MULTILINE).search
+            flags=re.MULTILINE,
+        ).search
         os.makedirs(self._reportdir, exist_ok=True)
 
     def analyze_av(self, local: bool = False):
-
         stderr_write("Matching test begins with av torrents...\n")
 
         reportfile = op.join(self._reportdir, "av_report.txt")
@@ -614,15 +634,14 @@ class Analyzer:
             r"(?:-[0-9]{2,8}(?:[hm]hb[0-9]{,2}|f?hd|[a-z])?|"
             r"[0-9]{2,8}(?:[hm]hb[0-9]{,2}|f?hd|[a-z]))"
             r")\b.*$",
-            flags=re.M).findall
+            flags=re.M,
+        ).findall
         word_finder = re.compile(r"(?:\b|_)([a-z]{3,})(?:\b|_)", re.M).findall
 
         paths = self._mteam.from_cache if local else self._mteam.from_web
         paths = paths(is_av=True)
 
-        with ProcessPoolExecutor() as ex, \
-            open(rawfile, "w", encoding="utf-8") as f:
-
+        with ProcessPoolExecutor() as ex, open(rawfile, "w", encoding="utf-8") as f:
             freqwords = ex.submit(get_freqwords)
             for content in ex.map(self._match_av, paths, chunksize=100):
                 total += 1
@@ -641,10 +660,10 @@ class Analyzer:
                     tmp.clear()
             freqwords = freqwords.result()
 
-        prefixcount = [(i, k, strings[k]) for k, i in prefixcount.items()
-                       if i >= 5]
-        wordcount = [(i, k) for k, i in wordcount.items()
-                     if i >= 5 and k not in freqwords]
+        prefixcount = [(i, k, strings[k]) for k, i in prefixcount.items() if i >= 5]
+        wordcount = [
+            (i, k) for k, i in wordcount.items() if i >= 5 and k not in freqwords
+        ]
         f = lambda t: (-t[0], t[1])
         prefixcount.sort(key=f)
         wordcount.sort(key=f)
@@ -652,23 +671,22 @@ class Analyzer:
 
         with open(reportfile, "w", encoding="utf-8") as f:
             for line in self._format_report(
-                    total=total,
-                    count=total - count,
-                    title="Potential ID Prefixes",
-                    result=prefixcount,
+                total=total,
+                count=total - count,
+                title="Potential ID Prefixes",
+                result=prefixcount,
             ):
                 stderr_write(line)
                 f.write(line)
 
-            f.write("\n\nPotential Keywords:\n"
-                    f'{"item":>{m}}  word\n'
-                    f'{"-" * 80}\n')
+            f.write(
+                "\n\nPotential Keywords:\n" f'{"item":>{m}}  word\n' f'{"-" * 80}\n'
+            )
             f.writelines(f"{i:{m}d}  {j}\n" for i, j in wordcount)
 
         stderr_write(f"Report saved to: {op.abspath(reportfile)}\n")
 
     def analyze_nonav(self, local: bool = False):
-
         stderr_write("Matching test begins with non-av torrents...\n")
 
         report_file = op.join(self._reportdir, "nonav_report.txt")
@@ -701,10 +719,10 @@ class Analyzer:
 
         with open(report_file, "w", encoding="utf-8") as f:
             for line in self._format_report(
-                    total=total,
-                    count=count,
-                    title="Matched Strings",
-                    result=wordcount,
+                total=total,
+                count=count,
+                title="Matched Strings",
+                result=wordcount,
             ):
                 stderr_write(line)
                 f.write(line)
@@ -720,14 +738,13 @@ class Analyzer:
                 return "".join(b)
 
     def _match_nonav(self, path: str) -> Tuple[str]:
-        """Return all matched videos in the file (in lower case). """
+        """Return all matched videos in the file (in lower case)."""
         with open(path, "r", encoding="utf-8") as f:
             return tuple(
-                m[1] for m in map(self.re, filter(self.ext, map(str.lower, f)))
-                if m)
+                m[1] for m in map(self.re, filter(self.ext, map(str.lower, f))) if m
+            )
 
     def _format_report(self, total, count, title, result, width=80):
-
         w1 = max(len("item"), len(f"{result[0][0]}") if result else 0)
         w2 = max(len("word"), max((len(t[1]) for t in result), default=0))
         w3 = max((len(f"{len(t[2])}") for t in result), default=0)
@@ -740,7 +757,8 @@ class Analyzer:
             f"Total: {total:,}, Matched: {count:,}, Percentage: {count / total:.2%}\n\n"
             f"{title}:\n"
             f'{"item":>{w1}}  {"word":{w2}}  strings\n'
-            f'{"-" * width}\n')
+            f'{"-" * width}\n'
+        )
         for i, k, s in result:
             yield fmt(i, k, len(s), ", ".join(slc(s, w4)))
 
@@ -756,22 +774,24 @@ class Analyzer:
 
 
 def init_session(path: str):
-
     from urllib3 import Retry
 
     global session
     session = requests.Session()
-    session.headers.update({
-        "User-Agent":
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-        'AppleWebKit/537.36 (KHTML, like Gecko) '
-        'Chrome/88.0.4324.104 Safari/537.36'
-    })
+    session.headers.update(
+        {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/88.0.4324.104 Safari/537.36"
+        }
+    )
     adapter = requests.adapters.HTTPAdapter(
-        max_retries=Retry(total=7,
-                          status_forcelist=frozenset((500, 502, 503, 504,
-                                                      521)),
-                          backoff_factor=0.3))
+        max_retries=Retry(
+            total=7,
+            status_forcelist=frozenset((500, 502, 503, 504, 521)),
+            backoff_factor=0.3,
+        )
+    )
     session.mount("http://", adapter)
     session.mount("https://", adapter)
 
@@ -805,8 +825,7 @@ def get_tree(url: str, **kwargs) -> HtmlElement:
 def get_freqwords(lo=3, k: int = 3000):
     """Get wordlist of the top `k` English words longer than `lo` letters."""
     u = "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa.txt"
-    m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$",
-                    get_response(u).text, re.M)
+    m = re.finditer(rf"^\s*([A-Za-z]{{{lo},}})\s*$", get_response(u).text, re.M)
     return frozenset(map(str.lower, map(itemgetter(1), islice(m, k))))
 
 
@@ -831,7 +850,6 @@ def xp_compile(path: str):
 
 
 def parse_config(configfile: str) -> dict:
-
     try:
         with open(configfile, "r", encoding="utf-8") as f:
             config = json.load(f)
@@ -859,7 +877,7 @@ def parse_config(configfile: str) -> dict:
             "av_page": "/adult.php?cat410=1&cat429=1&cat424=1&cat430=1&cat426=1&cat437=1&cat431=1&cat432=1",
             "non_av_page": "/torrents.php",
         },
-    } # yapf: disable
+    }  # yapf: disable
 
     with open(configfile, "w", encoding="utf-8") as f:
         json.dump(default, f, indent=4)
@@ -875,9 +893,9 @@ def norm_configpath(d: dict, k: str, default: str):
 
 
 def parse_arguments():
-
     parser = argparse.ArgumentParser(
-        description="The Ultimate Regex Builder, by David Pi.")
+        description="The Ultimate Regex Builder, by David Pi."
+    )
 
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -914,7 +932,8 @@ def parse_arguments():
     )
 
     group = parser.add_argument_group(
-        title="override corresponding settings in config file")
+        title="override corresponding settings in config file"
+    )
     group.add_argument(
         "-f",
         dest="regex_file",
@@ -940,14 +959,15 @@ def parse_arguments():
         dest="mteam_max",
         action="store",
         type=int,
-        help=("maximum mteam pages to scan, override 'mteam.page_max' "
-              "(0 for unlimited)"),
+        help=(
+            "maximum mteam pages to scan, override 'mteam.page_max' "
+            "(0 for unlimited)"
+        ),
     )
     return parser.parse_args()
 
 
 def main():
-
     args = parse_arguments()
 
     path = op.dirname(__file__)
