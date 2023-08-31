@@ -11,7 +11,7 @@ same words as the input.
 
 Using a simple word list:
 
-```python
+```
 from regen import Regen
 
 wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
@@ -24,7 +24,7 @@ print(result)  # Output will be '[AB]B[CD]'
 
 Using a word list that includes regular expressions:
 
-```python
+```
 from regen import Regen
 
 wordlist = ['[AB]B[CD]', 'XYZ']
