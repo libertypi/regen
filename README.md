@@ -1,4 +1,4 @@
-# ReGen: Generate Regular Expressions from words
+# ReGen: Generate Regular Expressions from Words
 
 ReGen is a Python library for computing regular expressions from a list of strings and regular expressions. It expands a list of regexes to a finite set of words, then generates a new regular expression using linear optimization to find the near-shortest combination. The computed regex should match precisely the same words as the input.
 

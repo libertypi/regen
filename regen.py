@@ -1,36 +1,49 @@
 #!/usr/bin/env python3
+
 """
-Main module for computing regular expressions from a list of strings/regex.
+ReGen is a Python library for computing regular expressions from a list of
+strings and regular expressions. It expands a list of regexes to a finite set of
+words, then generates a new regular expression using linear optimization to find
+the near-shortest combination. The computed regex should match precisely the
+same words as the input.
 
-The libary expand a list of regex to a finite set of words, then generate a new
-regular expression using linear optimization to find the near-shortest
-combination. The computed regex should match exactly the same words as input.
+### Example 1
 
-The `Regen` class is intended for external uses. Other classes in this libary
-are for internal uses only.
+Using a simple word list:
 
-### Examples:
+```python
+from regen import Regen
 
-    >>> from regen import Regen
+wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
+regen = Regen(wordlist)
+result = regen.to_regex()
+print(result)  # Output will be '[AB]B[CD]'
+```
 
-    >>> wordlist = ['ABC', 'ABD', 'BBC', 'BBD']
-    >>> regen = Regen(wordlist)
-    >>> regen.to_regex()
-    '[AB]B[CD]'
+### Example 2
 
-    >>> wordlist = ['[AB]B[CD]', 'XYZ']
-    >>> regen = Regen(wordlist)
-    >>> regen.to_words()
-    ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
-    >>> regen.to_regex()
-    '(XYZ|[AB]B[CD])'
-    >>> regen.to_regex(omitOuterParen=True)
-    'XYZ|[AB]B[CD]'
+Using a word list that includes regular expressions:
 
-### Author: `David Pi`
+```python
+from regen import Regen
+
+wordlist = ['[AB]B[CD]', 'XYZ']
+regen = Regen(wordlist)
+words = regen.to_words()
+print(words)  # Output will be ['ABC', 'ABD', 'BBC', 'BBD', 'XYZ']
+
+result = regen.to_regex()
+print(result)  # Output will be '(XYZ|[AB]B[CD])'
+
+result = regen.to_regex(omitOuterParen=True)
+print(result)  # Output will be 'XYZ|[AB]B[CD]'
+```
+
+## Author
+- **David Pi**
 """
 
-__all__ = ("Regen", )
+__all__ = ("Regen",)
 
 import re
 from collections import defaultdict
@@ -38,8 +51,7 @@ from functools import lru_cache
 from itertools import chain, compress, filterfalse
 from typing import Iterable, Iterator, List, Optional, Union
 
-from ortools.sat.python.cp_model import (FEASIBLE, OPTIMAL, CpModel, CpSolver,
-                                         LinearExpr)
+from ortools.sat.python.cp_model import FEASIBLE, OPTIMAL, CpModel, CpSolver, LinearExpr
 
 _specials = frozenset(r"{}()[]|?*+")
 _rangeChars = frozenset("0123456789,")
@@ -48,7 +60,6 @@ _split_token = re.compile(r"[^\\]|\\.").findall
 
 
 class Parser:
-
     __slots__ = ("result", "hold", "charset", "index", "subParser", "token")
 
     def __init__(self) -> None:
@@ -81,14 +92,13 @@ class Parser:
                 if char == "|":
                     self._concat_hold()
                     yield from map(tuple, result)
-                    result[:] = ([], )
+                    result[:] = ([],)
                 elif char == "[":
                     self._charsetStrategy()
                 elif char == "(":
                     self._parenStrategy()
                 else:
-                    raise ValueError(
-                        f"Invalid character '{char}' in '{self.string}'")
+                    raise ValueError(f"Invalid character '{char}' in '{self.string}'")
             else:
                 suffix = eatsuffix()
                 if not suffix:
@@ -102,12 +112,11 @@ class Parser:
 
         self._concat_hold()
         yield from map(tuple, result)
-        result[:] = ([], )
+        result[:] = ([],)
         self.index = 0
         self.token = None
 
     def _charsetStrategy(self):
-
         start = self.index - 1  # including "["
         result = self.result
         hold = self.hold
@@ -121,7 +130,7 @@ class Parser:
                 end = self.token.index("]", start + 3) + 1
             except ValueError:
                 raise ValueError(f"Bad character set: {self.string}")
-            if "[" in self.token[start + 1:end - 1]:
+            if "[" in self.token[start + 1 : end - 1]:
                 raise ValueError(f"Nested character set: {self.string}")
 
             self.index = end
@@ -139,8 +148,7 @@ class Parser:
                             hi = eat()
                             char = f"[{lo}{char}{hi}]"
                     else:
-                        raise ValueError(
-                            f"Nested character set: {self.string}")
+                        raise ValueError(f"Nested character set: {self.string}")
                 charset.append(char)
                 char = eat()
             else:
@@ -163,7 +171,6 @@ class Parser:
         charset.clear()
 
     def _parenStrategy(self):
-
         start = self.index  # 1 char after "("
         if self.token[start] == "?":
             raise ValueError(
@@ -238,8 +245,7 @@ class Parser:
             try:
                 # +2 so "{}" will not be matched
                 suffixEnd = self.token.index("}", suffixStart + 2)
-                if not _rangeChars.issuperset(
-                        self.token[suffixStart + 1:suffixEnd]):
+                if not _rangeChars.issuperset(self.token[suffixStart + 1 : suffixEnd]):
                     raise ValueError
             except ValueError:
                 raise ValueError(f"Bad repetition range: {self.string}")
@@ -284,7 +290,6 @@ def optimize(tokenSet: frozenset, omitOuterParen: bool = False) -> str:
 
 
 def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
-
     tokenSetLength = len(tokenSet)
     if tokenSetLength == 1:
         string = "".join(*tokenSet)
@@ -318,9 +323,7 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
     factor = tokenSetLength + 1
 
     while prefix or suffix:
-
         for i, source in (0, prefix), (1, suffix):
-
             for k, v in source.items():
                 mirror[frozenset(segment[j][i][k] for j in v)].append(k)
 
@@ -336,9 +339,13 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
                     right = optimize(frozenset(v))
                     string = (left + right) if i else (right + left)
                     length = len(key)
-                    value = (sum(map(len, chain.from_iterable(key))) + length +
-                             2 * (length == tokenSetLength) - len(string) -
-                             1) * factor - length
+                    value = (
+                        sum(map(len, chain.from_iterable(key)))
+                        + length
+                        + 2 * (length == tokenSetLength)
+                        - len(string)
+                        - 1
+                    ) * factor - length
                     candidate[key] = (value, string) if value > 0 else None
 
                 if candidate[key]:
@@ -378,13 +385,12 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
 
 
 def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
-
     if len(tokenSet) > 1:
         char = sorted(chain.from_iterable(tokenSet))
 
-        if ("]", ) in tokenSet:
+        if ("]",) in tokenSet:
             char.insert(0, char.pop(char.index("]")))
-        if ("-", ) in tokenSet:
+        if ("-",) in tokenSet:
             char.append(char.pop(char.index("-")))
 
         return f'[{"".join(char)}]{quantifier}'
@@ -441,7 +447,6 @@ def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
     pool_get = pool.get
 
     while unvisited:
-
         currentKey = unvisited.pop()
         if all(map(currentKey.isdisjoint, unvisited)):
             yield currentKey
@@ -459,7 +464,7 @@ def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
             currentVarNot = pool[currentKey].Not()
 
             if () in currentKey:
-                currentKey = currentKey.difference(((), ))
+                currentKey = currentKey.difference(((),))
 
             for nextKey in filterfalse(currentKey.isdisjoint, unvisited):
                 nextVar = pool_get(nextKey)
@@ -470,14 +475,17 @@ def _optimize_group(unvisited: set, candidate: dict) -> Iterator[frozenset]:
                 AddImplication(nextVar, currentVarNot)
 
         model.Maximize(
-            LinearExpr.WeightedSum(tuple(pool.values()),
-                                   tuple(candidate[k][0] for k in pool)))
+            LinearExpr.WeightedSum(
+                tuple(pool.values()), tuple(candidate[k][0] for k in pool)
+            )
+        )
 
         solver = CpSolver()
         status = solver.Solve(model)
         if status != OPTIMAL and status != FEASIBLE:
             raise RuntimeError(
-                f"CP-SAT Solver failed, status: {solver.StatusName(status)}")
+                f"CP-SAT Solver failed, status: {solver.StatusName(status)}"
+            )
 
         yield from compress(pool, map(solver.BooleanValue, pool.values()))
         pool.clear()
@@ -512,12 +520,11 @@ class Regen:
         :param wordlist: An iterable of strings contains words and/or regexps.
         """
         if isinstance(wordlist, str):
-            wordlist = (wordlist, )
+            wordlist = (wordlist,)
         elif not isinstance(wordlist, Iterable):
             raise TypeError("Input should be a list of strings.")
         parser = Parser()
-        self._tokens = frozenset(
-            chain.from_iterable(map(parser.parse, wordlist)))
+        self._tokens = frozenset(chain.from_iterable(map(parser.parse, wordlist)))
         self._cache = {}
 
     def to_words(self) -> List[str]:
@@ -533,8 +540,7 @@ class Regen:
             raise TypeError(f"expect bool, not {type(omitOuterParen):!r}")
         regex = self._cache.get(omitOuterParen)
         if regex is None:
-            regex = self._cache[omitOuterParen] = optimize(
-                self._tokens, omitOuterParen)
+            regex = self._cache[omitOuterParen] = optimize(self._tokens, omitOuterParen)
         return regex
 
     def _verify(self):
@@ -544,28 +550,33 @@ class Regen:
             regex = self.to_regex()
 
         if self._tokens != Regen(regex)._tokens:
-            raise ValueError("Extraction from computed regex is different "
-                             "from that of original wordlist.")
+            raise ValueError(
+                "Extraction from computed regex is different "
+                "from that of original wordlist."
+            )
 
         not_special = _specials.union(("\\")).isdisjoint
         for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
             if not_special(i):
                 raise ValueError(
-                    f"Computed regex does not fully match this word: '{i}'")
+                    f"Computed regex does not fully match this word: '{i}'"
+                )
 
 
 def parse_arguments():
-
     import argparse
 
     parser = argparse.ArgumentParser(
         description=(
             "Generate regular expressions from a set of words and regexes.\n"
-            "Author: David Pi <libertypi@gmail.com>"),
-        epilog=("examples:\n"
-                '  %(prog)s cat bat at "fat|boat"\n'
-                '  %(prog)s -e "[AB]C[DE]"\n'
-                '  %(prog)s -f words.txt'),
+            "Author: David Pi <libertypi@gmail.com>"
+        ),
+        epilog=(
+            "examples:\n"
+            '  %(prog)s cat bat at "fat|boat"\n'
+            '  %(prog)s -e "[AB]C[DE]"\n'
+            "  %(prog)s -f words.txt"
+        ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -623,8 +634,8 @@ def parse_arguments():
 
 
 def main():
-
     import sys
+
     args = parse_arguments()
 
     if args.file is None:
