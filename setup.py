@@ -18,7 +18,7 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Programming Language :: Python :: 3",
     ],
-    keywords="regular-expression, optimization",
+    keywords="regular-expression, regex, optimization",
     packages=find_packages(exclude=["test"]),
     install_requires=["ortools"],
     python_requires=">=3.6",
