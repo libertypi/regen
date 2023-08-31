@@ -37,4 +37,3 @@ print(result)  # Output will be 'XYZ|[AB]B[CD]'
 ## Author
 
 - **David Pi**
-- **Contact**: [libertypi@gmail.com](mailto:libertypi@gmail.com)
