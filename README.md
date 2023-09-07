@@ -51,7 +51,7 @@ Convert a list of words and regular expressions into a new regular expression:
 ### Example 3
 regen.py can be used as a command-line utility:
 ```bash
-regen.py --compute cat bat at "fat|boat"
+regen.py --compute "cat" "bat" "at" "fat|boat"
 # Output: (bo?|c|f)?at
 
 regen.py --extract "[AB]C[DE]"
