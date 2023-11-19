@@ -14,7 +14,6 @@ ReGen is a Python library for computing regular expressions from a list of strin
 
 `A[KLRZ]|C[AOTZ]|DC|DE|FL|GU|HI|I[ADLN]|KS|KY|M[ADEINOST]|N[CDEHJMVY]|O[HKR]|PR|RI|SC|SD|TN|TX|UT|V[AIT]|W[AIVY]|[GLP]A`
 
-
 ### Natural Language
 
 *"Imagined Communities" by Benedict Anderson, first paragraph of Introduction, with non-word characters removed. 136 words*
