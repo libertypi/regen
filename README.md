@@ -1,6 +1,6 @@
 # Regen: Generate Regular Expressions from Words
 
-Regen is a Python library for creating [regular expressions](https://en.wikipedia.org/wiki/Regular_expression) from a finite set of words, and vice versa. Utilizing [constraint programming](https://developers.google.com/optimization/cp) (CP), it finds the *near-shortest* regular expression that matches precisely the same words as the input.
+Regen is a Python library for creating [regular expressions](https://en.wikipedia.org/wiki/Regular_expression) from a finite set of words, and vice versa. Utilizing [constraint programming](https://developers.google.com/optimization/cp) (CP), it finds the *near-shortest* pattern that matches precisely the same words as the input.
 
 - Expands regular expressions into a list of words that they can match.
 - Generates an optimal regular expression from a given list of words.
