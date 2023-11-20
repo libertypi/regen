@@ -5,8 +5,6 @@ Regen is a Python library for creating [regular expressions](https://en.wikipedi
 - Expands regular expressions into a list of words that they can match.
 - Generates an optimal regular expression from a given list of words.
 
-Currently, regen supports only "finite matching," meaning it can generate patterns that match a specific, finite set of strings. For instance, it can produce `[AB]C?` (matching `A`, `B`, `AC`, `BC`), but not `[AB]C*`, which would match an unlimited number of `C`s. And it can only expand the former type of patterns.
-
 ## Examples
 
 ### Two-Letter Abbreviations of the 50 US States
@@ -89,6 +87,10 @@ regen.py --extract "[AB]C[DE]"
 regen.py -f words.txt
 # Compute the regex from a word list file, with one word per line.
 ```
+
+## Limitations
+
+Currently, regen supports only "finite matching," meaning it can generate patterns that match a specific, finite set of strings. For instance, it can produce `[AB]C?` (matching `A`, `B`, `AC`, `BC`), but not `[AB]C*`, which would match an unlimited number of `C`s. And it can only expand the former type of patterns.
 
 ## Author
 
