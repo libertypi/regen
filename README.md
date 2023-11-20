@@ -47,7 +47,7 @@ Convert a list of words into a regular expression:
 
 ### Example 2
 
-Extract a list of regular expressions to a word list:
+Expand regular expressions into a word list:
 
 ```python
 >>> from regen import Regen
@@ -72,7 +72,9 @@ Then convert it into a new regular expression:
 ```
 
 ### Example 3
+
 regen.py can be used as a command-line utility:
+
 ```bash
 regen.py --compute "cat" "bat" "at" "fat|boat"
 # Output: (bo?|c|f)?at
