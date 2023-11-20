@@ -90,7 +90,7 @@ regen.py -f words.txt
 
 ## Limitations
 
-Currently, regen supports only "finite matching," meaning it can generate patterns that match a specific, finite set of strings. For instance, it can produce `[AB]C?` (matching `A`, `B`, `AC`, `BC`), but not `[AB]C*`, which would match an unlimited number of `C`s. And it can only expand the former type of patterns.
+Currently, regen supports only "finite matching," meaning it can generate patterns that match a specific, finite set of strings. For instance, it can produce `[AB]C?` (matching `A`, `B`, `AC`, `BC`), but not `[AB]C*`, which would match an unlimited number of `C`. And it can only expand the former type of patterns.
 
 ## Author
 
