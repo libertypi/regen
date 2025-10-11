@@ -555,8 +555,7 @@ class Regen:
 
         if self._tokens != Regen(regex)._tokens:
             raise ValueError(
-                "Extraction from computed regex is different "
-                "from that of original wordlist."
+                "Extraction from computed regex is different from the original wordlist."
             )
 
         not_special = _specials.union(("\\")).isdisjoint
