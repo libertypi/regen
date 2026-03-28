@@ -51,9 +51,9 @@ __all__ = ("Regen",)
 
 import re
 from collections import defaultdict
+from collections.abc import Iterable, Iterator
 from functools import lru_cache
 from itertools import chain, compress, filterfalse
-from typing import Iterable, Iterator, List, Optional, Union
 
 from ortools.sat.python.cp_model import FEASIBLE, OPTIMAL, CpModel, CpSolver, LinearExpr
 
@@ -73,7 +73,7 @@ class Parser:
         self.index = 0
         self.subParser = self.token = None
 
-    def parse(self, _input: Union[str, List[str]]):
+    def parse(self, _input: str | list[str]):
         """Convert a regular expression to a tokenset."""
 
         if isinstance(_input, str):
@@ -150,6 +150,16 @@ class Parser:
                         if charset and self._peek() != "]":
                             lo = charset.pop()
                             hi = eat()
+                            if len(lo) == 1 and hi and len(hi) == 1:
+                                if lo > hi:
+                                    raise ValueError(
+                                        f"Bad character range {lo}-{hi}: {self.string}"
+                                    )
+                                charset.extend(
+                                    chr(c) for c in range(ord(lo), ord(hi) + 1)
+                                )
+                                char = eat()
+                                continue
                             char = f"[{lo}{char}{hi}]"
                     else:
                         raise ValueError(f"Nested character set: {self.string}")
@@ -224,7 +234,7 @@ class Parser:
                 s.extend(hold)
             hold.clear()
 
-    def _eat(self) -> Optional[str]:
+    def _eat(self) -> str | None:
         """Consume one character in the token list."""
         try:
             char = self.token[self.index]
@@ -233,13 +243,13 @@ class Parser:
         except IndexError:
             pass
 
-    def _peek(self) -> Optional[str]:
+    def _peek(self) -> str | None:
         try:
             return self.token[self.index]
         except IndexError:
             pass
 
-    def _eat_suffix(self) -> Optional[str]:
+    def _eat_suffix(self) -> str | None:
         char = self._peek()
         if char not in _repetitions:
             return
@@ -296,7 +306,7 @@ def optimize(tokenSet: frozenset, omitOuterParen: bool = False) -> str:
 def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
     tokenSetLength = len(tokenSet)
     if tokenSetLength == 1:
-        string = "".join(*tokenSet)
+        string = "".join(next(iter(tokenSet)))
         return f"({string}){quantifier}" if quantifier else string
 
     result = []
@@ -383,21 +393,44 @@ def _wordStrategy(tokenSet: set, quantifier: str, omitOuterParen: bool) -> str:
     result.sort()
     string = "|".join(result)
 
-    if len(result) > 1 and not omitOuterParen or quantifier:
+    if (len(result) > 1 and not omitOuterParen) or quantifier:
         return f"({string}){quantifier}"
     return string
+
+
+def _collapse_ranges(chars: list[str]) -> str:
+    """Collapse consecutive character runs into ranges for [...] classes."""
+    if not chars:
+        return ""
+    parts = []
+    run_start = 0
+    for i in range(1, len(chars) + 1):
+        if i == len(chars) or ord(chars[i]) != ord(chars[i - 1]) + 1:
+            run_len = i - run_start
+            if run_len > 3:
+                parts.append(f"{chars[run_start]}-{chars[i - 1]}")
+            else:
+                parts.extend(chars[run_start:i])
+            run_start = i
+    return "".join(parts)
 
 
 def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
     if len(tokenSet) > 1:
         char = sorted(chain.from_iterable(tokenSet))
 
-        if ("]",) in tokenSet:
-            char.insert(0, char.pop(char.index("]")))
-        if ("-",) in tokenSet:
-            char.append(char.pop(char.index("-")))
+        has_bracket = ("]",) in tokenSet
+        has_dash = ("-",) in tokenSet
+        if has_bracket:
+            char.remove("]")
+        if has_dash:
+            char.remove("-")
 
-        return f'[{"".join(char)}]{quantifier}'
+        body = _collapse_ranges(char)
+        prefix = "]" if has_bracket else ""
+        suffix = "-" if has_dash else ""
+
+        return f"[{prefix}{body}{suffix}]{quantifier}"
 
     return f"{tokenSet.pop()[0]}{quantifier}"
 
@@ -412,7 +445,7 @@ def _filter_affix(d: dict, s: set = None):
     and remove single member groups.
 
     - Example: (AB: ABC, ABD), (A: ABC, ABD), (ABC: ABC): only the first
-        item will be keeped.
+        item will be kept.
     """
     tmp = {}
     setdefault = tmp.setdefault
@@ -531,7 +564,7 @@ class Regen:
         self._tokens = frozenset(chain.from_iterable(map(parser.parse, wordlist)))
         self._cache = {}
 
-    def to_words(self) -> List[str]:
+    def to_words(self) -> list[str]:
         """Extract the regular expressions to a list of plain words."""
         return sorted(map("".join, self._tokens))
 
@@ -541,7 +574,7 @@ class Regen:
         :param omitOuterParen: omited the outmost parentheses (if any).
         """
         if not isinstance(omitOuterParen, bool):
-            raise TypeError(f"expect bool, not {type(omitOuterParen):!r}")
+            raise TypeError(f"expect bool, not {type(omitOuterParen)!r}")
         regex = self._cache.get(omitOuterParen)
         if regex is None:
             regex = self._cache[omitOuterParen] = optimize(self._tokens, omitOuterParen)
@@ -558,7 +591,7 @@ class Regen:
                 "Extraction from computed regex is different from the original wordlist."
             )
 
-        not_special = _specials.union(("\\")).isdisjoint
+        not_special = _specials.union("\\").isdisjoint
         for i in filterfalse(re.compile(regex).fullmatch, self.to_words()):
             if not_special(i):
                 raise ValueError(
