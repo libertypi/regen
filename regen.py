@@ -63,10 +63,6 @@ _repetitions = frozenset("*?+{")
 _split_token = re.compile(r"[^\\]|\\.").findall
 
 
-def _is_escape(s: str) -> bool:
-    return len(s) == 2 and s[0] == "\\"
-
-
 class Parser:
     __slots__ = ("result", "hold", "charset", "index", "subParser", "token")
 
@@ -444,12 +440,16 @@ def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
     return f"{tokenSet.pop()[0]}{quantifier}"
 
 
+def _is_escape(s: str) -> bool:
+    return s[0] == "\\" and len(s) == 2
+
+
 @lru_cache(maxsize=512)
 def _is_word(token) -> bool:
     if len(token) != 1:
         return not not token
     s = token[0]
-    return len(s) > 1 and not (s[0] == "\\" and len(s) == 2)
+    return len(s) > 1 and not _is_escape(s)
 
 
 def _filter_affix(d: dict, s: set = None):
