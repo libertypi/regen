@@ -63,6 +63,10 @@ _repetitions = frozenset("*?+{")
 _split_token = re.compile(r"[^\\]|\\.").findall
 
 
+def _is_escape(s: str) -> bool:
+    return len(s) == 2 and s[0] == "\\"
+
+
 class Parser:
     __slots__ = ("result", "hold", "charset", "index", "subParser", "token")
 
@@ -426,7 +430,12 @@ def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
         if has_dash:
             char.remove("-")
 
-        body = _collapse_ranges(char)
+        escaped = []
+        regular = []
+        for c in char:
+            (escaped if _is_escape(c) else regular).append(c)
+
+        body = _collapse_ranges(regular) + "".join(escaped)
         prefix = "]" if has_bracket else ""
         suffix = "-" if has_dash else ""
 
@@ -437,7 +446,10 @@ def _charsetStrategy(tokenSet: set, quantifier: str = "") -> str:
 
 @lru_cache(maxsize=512)
 def _is_word(token) -> bool:
-    return sum(map(len, token)) > 1
+    if len(token) != 1:
+        return not not token
+    s = token[0]
+    return len(s) > 1 and not (s[0] == "\\" and len(s) == 2)
 
 
 def _filter_affix(d: dict, s: set = None):

@@ -167,5 +167,27 @@ class TestRegen(unittest.TestCase):
             regen._verify()
 
 
+    def test_escaped_chars_optimizer(self):
+        """Optimizer treats escaped characters as single chars, not words."""
+        values = (
+            # Main fix: escaped + regular chars -> charset
+            ([r'\s', '_', '-'], r'[_\s-]'),
+            # Mixed escaped + regular
+            ([r'\d', 'a', 'b', 'c'], r'[abc\d]'),
+            # All escaped chars in charset
+            ([r'\s', r'\w', r'\d'], r'[\d\s\w]'),
+            # Escaped chars in word prefix factoring
+            ([r'\sA', r'\sB', r'\wA', r'\wB'], r'[\s\w][AB]'),
+        )
+        for wordlist, answer in values:
+            result = Regen(wordlist).to_regex()
+            self.assertEqual(result, answer, msg=f"{wordlist}: {result}")
+
+    def test_escaped_chars_parser(self):
+        """Parser handles escaped chars in character classes."""
+        result = Regen([r'[\s_-]']).to_words()
+        self.assertEqual(result, ['-', '\\s', '_'])
+
+
 if __name__ == "__main__":
     unittest.main()
